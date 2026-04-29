@@ -55,6 +55,7 @@ export const Install = () => {
       ? `${URL}/mcp/auth/${clientName}/http`
       : `${URL}/mcp/${clientName}/sse/${user}`;
 
+
   const handleCopy = async (tab: string, isMcp: boolean = false) => {
     const text = isMcp
       ? getMcpUrl("openmemory")
