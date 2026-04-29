@@ -1,17 +1,38 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
 from app.models import App, User
 from sqlalchemy.orm import Session
 
 
-def get_or_create_user(db: Session, user_id: str) -> User:
-    """Get or create a user with the given user_id"""
+def get_or_create_user(
+    db: Session,
+    user_id: str,
+    name: Optional[str] = None,
+    email: Optional[str] = None,
+) -> User:
+    """Get or create a user with the given user_id.
+
+    When *name* or *email* are provided and the existing record has NULL
+    values for those fields, they are updated (one-time enrichment from
+    JWT claims).
+    """
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
-        user = User(user_id=user_id)
+        user = User(user_id=user_id, name=name, email=email)
         db.add(user)
         db.commit()
         db.refresh(user)
+    else:
+        updated = False
+        if name and not user.name:
+            user.name = name
+            updated = True
+        if email and not user.email:
+            user.email = email
+            updated = True
+        if updated:
+            db.commit()
+            db.refresh(user)
     return user
 
 

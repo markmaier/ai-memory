@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# ai-memory-token — Get a Keycloak JWT for the ai-memory MCP server.
+#
+# Usage:
+#   ai-memory-token              # password grant (prompts for password)
+#   ai-memory-token --service    # client_credentials (no user interaction)
+#   ai-memory-token --configure  # get token + update OpenCode config
+#
+# Works on: Linux, macOS, WSL, Windows (Git Bash / MSYS2)
+
+set -euo pipefail
+
+KEYCLOAK_URL="https://dev-silver.fra.nip-non-prod.cloud.netcetera.com/realms/nca_users/protocol/openid-connect/token"
+CLIENT_ID_PUBLIC="ai-memory-cli"
+CLIENT_ID_CONFIDENTIAL="ai-memory"
+CLIENT_SECRET="ba89d117-a880-4a2d-a3fc-94658fae701a"
+DEFAULT_USERNAME="maier"
+OPENCODE_CONFIG="${HOME}/.config/opencode/opencode.json"
+
+get_token_password() {
+  local username="${1:-$DEFAULT_USERNAME}"
+  read -rsp "Keycloak password for ${username}: " password
+  echo >&2
+
+  local resp
+  resp=$(curl -sS -X POST "$KEYCLOAK_URL" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "grant_type=password&client_id=${CLIENT_ID_PUBLIC}&username=${username}&password=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${password}'))")" 2>&1)
+
+  local token
+  token=$(echo "$resp" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('access_token',''))" 2>/dev/null)
+
+  if [ -z "$token" ]; then
+    echo "Error: $(echo "$resp" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('error_description',d.get('error','unknown')))" 2>/dev/null)" >&2
+    return 1
+  fi
+
+  local expires
+  expires=$(echo "$resp" | python3 -c "import sys,json;print(json.load(sys.stdin).get('expires_in','?'))" 2>/dev/null)
+  echo "Token obtained (expires in ${expires}s)" >&2
+  echo "$token"
+}
+
+get_token_service() {
+  local resp
+  resp=$(curl -sS -X POST "$KEYCLOAK_URL" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "grant_type=client_credentials&client_id=${CLIENT_ID_CONFIDENTIAL}&client_secret=${CLIENT_SECRET}" 2>&1)
+
+  local token
+  token=$(echo "$resp" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('access_token',''))" 2>/dev/null)
+
+  if [ -z "$token" ]; then
+    echo "Error: $(echo "$resp" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('error_description',d.get('error','unknown')))" 2>/dev/null)" >&2
+    return 1
+  fi
+
+  local expires
+  expires=$(echo "$resp" | python3 -c "import sys,json;print(json.load(sys.stdin).get('expires_in','?'))" 2>/dev/null)
+  echo "Service account token obtained (expires in ${expires}s)" >&2
+  echo "$token"
+}
+
+configure_opencode() {
+  local token="$1"
+
+  python3 - "$token" "$OPENCODE_CONFIG" <<'PYEOF'
+import sys, json
+from pathlib import Path
+
+token = sys.argv[1]
+config_path = Path(sys.argv[2])
+
+if not config_path.exists():
+    print(f"Error: {config_path} not found", file=sys.stderr)
+    sys.exit(1)
+
+config = json.loads(config_path.read_text())
+
+if "mcp" not in config or "ai-memory" not in config["mcp"]:
+    print("Error: ai-memory MCP not found in config", file=sys.stderr)
+    sys.exit(1)
+
+mcp = config["mcp"]["ai-memory"]
+
+# Switch from OAuth to static token
+mcp["oauth"] = False
+mcp["headers"] = {"Authorization": f"Bearer {token}"}
+
+config_path.write_text(json.dumps(config, indent=2) + "\n")
+print(f"Updated {config_path}: oauth=false, Bearer token set", file=sys.stderr)
+print("Restart OpenCode to apply changes.", file=sys.stderr)
+PYEOF
+}
+
+case "${1:-}" in
+  --service|-s)
+    get_token_service
+    ;;
+  --configure|-c)
+    mode="${2:---service}"
+    if [ "$mode" = "--password" ] || [ "$mode" = "-p" ]; then
+      token=$(get_token_password "${3:-$DEFAULT_USERNAME}")
+    else
+      token=$(get_token_service)
+    fi
+    configure_opencode "$token"
+    ;;
+  --help|-h)
+    echo "Usage: ai-memory-token [--service|--configure [--password [user]]|--help]"
+    echo ""
+    echo "  (default)              Password grant (prompts for password)"
+    echo "  --service, -s          Client credentials (service account, no interaction)"
+    echo "  --configure, -c        Get token + update OpenCode config (default: service account)"
+    echo "  --configure --password Get token via password grant + update config"
+    echo "  --help, -h             Show this help"
+    ;;
+  *)
+    get_token_password "${1:-$DEFAULT_USERNAME}"
+    ;;
+esac

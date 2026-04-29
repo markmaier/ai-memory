@@ -28,8 +28,10 @@ from app.models import Memory, MemoryAccessLog, MemoryState, MemoryStatusHistory
 from app.utils.db import get_user_and_app
 from app.utils.memory import get_memory_client
 from app.utils.permissions import check_memory_access_permissions
+from app.utils.auth import require_jwt_user
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
 from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
@@ -179,7 +181,7 @@ async def search_memory(query: str) -> str:
             hits = memory_client.vector_store.search(
                 query=query, 
                 vectors=embeddings, 
-                limit=10, 
+                top_k=10, 
                 filters=filters,
             )
 
@@ -463,34 +465,69 @@ async def handle_sse(request: Request):
 
 
 @mcp_router.post("/messages/")
-async def handle_get_message(request: Request):
-    return await handle_post_message(request)
+async def handle_sse_post_message(request: Request):
+    """Handle POST messages for SSE transport.
+
+    The SSE transport sends responses back through the SSE stream, not through
+    the POST response.  We must pass the raw ASGI ``send`` callable so the
+    transport can acknowledge receipt (HTTP 202).  Swallowing ``send`` with a
+    no-op breaks the message routing and causes clients to time out.
+    """
+    await sse.handle_post_message(request.scope, request.receive, request._send)
 
 
-@mcp_router.post("/{client_name}/sse/{user_id}/messages/")
-async def handle_post_message(request: Request):
-    return await handle_post_message(request)
+sse_auth = SseServerTransport("/mcp/auth/messages/")
 
-async def handle_post_message(request: Request):
-    """Handle POST messages for SSE"""
+
+@mcp_router.get("/auth/{client_name}/sse")
+async def handle_sse_authenticated(request: Request):
+    """SSE endpoint with JWT-based user identity (no user_id in URL path)."""
     try:
-        body = await request.body()
+        payload = await require_jwt_user(request)
+    except Exception as exc:
+        status = getattr(exc, "status_code", 401)
+        detail = getattr(exc, "detail", str(exc))
+        return JSONResponse(status_code=status, content={"detail": detail})
 
-        # Create a simple receive function that returns the body
-        async def receive():
-            return {"type": "http.request", "body": body, "more_body": False}
+    uid = payload["preferred_username"]
+    client_name = request.path_params.get("client_name")
 
-        # Create a simple send function that does nothing
-        async def send(message):
-            return {}
+    user_token = user_id_var.set(uid)
+    client_token = client_name_var.set(client_name or "")
 
-        # Call handle_post_message with the correct arguments
-        await sse.handle_post_message(request.scope, receive, send)
+    try:
+        from app.database import SessionLocal
+        from app.utils.db import get_or_create_user
+        db = SessionLocal()
+        try:
+            get_or_create_user(
+                db,
+                uid,
+                name=payload.get("name"),
+                email=payload.get("email"),
+            )
+        finally:
+            db.close()
 
-        # Return a success response
-        return {"status": "ok"}
+        async with sse_auth.connect_sse(
+            request.scope,
+            request.receive,
+            request._send,
+        ) as (read_stream, write_stream):
+            await mcp._mcp_server.run(
+                read_stream,
+                write_stream,
+                mcp._mcp_server.create_initialization_options(),
+            )
     finally:
-        pass
+        user_id_var.reset(user_token)
+        client_name_var.reset(client_token)
+
+
+@mcp_router.post("/auth/messages/")
+async def handle_sse_post_message_authenticated(request: Request):
+    """POST handler for the authenticated SSE transport."""
+    await sse_auth.handle_post_message(request.scope, request.receive, request._send)
 
 
 @mcp_router.api_route("/{client_name}/http/{user_id}", methods=["POST", "GET", "DELETE"])
