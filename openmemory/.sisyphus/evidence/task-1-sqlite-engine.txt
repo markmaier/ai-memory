@@ -1,0 +1,4 @@
+<class 'sqlalchemy.engine.base.Engine'>
+---
+EXIT_CODE=0
+RESULT: PASS - SQLite engine creates successfully with check_same_thread=False
