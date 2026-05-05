@@ -488,7 +488,7 @@ By default, OpenMemory uses a single `USER` identity for all requests. OIDC lets
 
 ### How It Works
 
-When `OIDC_ISSUER_URL` is set, the `/mcp/auth/{client_name}/sse` endpoint requires a Bearer token in the `Authorization` header. The server validates the token against the provider's JWKS endpoint, then reads the `preferred_username` claim from the JWT payload. That claim becomes the `user_id` for all memory operations in that session.
+When `OIDC_ISSUER_URL` is set, the `/mcp/auth/{client_name}/http` endpoint requires a Bearer token in the `Authorization` header. The server validates the token against the provider's JWKS endpoint, then reads the `preferred_username` claim from the JWT payload. That claim becomes the `user_id` for all memory operations in that session.
 
 Each team member gets their own memory namespace automatically, just by authenticating.
 
@@ -530,7 +530,7 @@ Your OIDC provider must include `preferred_username` in access tokens. Most prov
 Instead of the unauthenticated URL (which embeds the user ID in the path), use:
 
 ```
-http://your-api-host:8765/mcp/auth/{client_name}/sse
+http://your-api-host:8765/mcp/auth/{client_name}/http
 ```
 
 Your MCP client must send the Bearer token in the `Authorization` header on each connection. The `{client_name}` segment identifies the connecting application (for example `claude`, `cursor`, or `vscode`).
@@ -622,7 +622,7 @@ Three URL patterns are available depending on your access model:
 |---|---|---|
 | **Personal (unauthenticated)** | `http://<your-server>:8765/mcp/<client>/sse/<user-id>` | Single user or local dev. No auth required. |
 | **Shared team / project** | `http://<your-server>:8765/mcp/<client>/sse/team-<project>` | Multiple people sharing one memory namespace. Use a descriptive project name. |
-| **Authenticated (OIDC)** | `http://<your-server>:8765/mcp/auth/<client>/sse` | Production deployments with `OIDC_ISSUER_URL` configured. User identity comes from the JWT. |
+| **Authenticated (OIDC)** | `http://<your-server>:8765/mcp/auth/<client>/http` | Production deployments with `OIDC_ISSUER_URL` configured. User identity comes from the JWT. |
 
 The `<client>` segment is a label that scopes memories by tool. Use `opencode`, `claude`, `copilot`, `cursor`, or any slug that makes sense for your workflow.
 
@@ -687,7 +687,7 @@ Connect two namespaces at once so your personal memories and team memories are b
   "mcpServers": {
     "openmemory": {
       "type": "sse",
-      "url": "http://<your-server>:8765/mcp/auth/opencode/sse"
+"url": "http://<your-server>:8765/mcp/auth/opencode/http"
     }
   }
 }
@@ -759,7 +759,7 @@ npx @openmemory/install local http://localhost:8765/mcp/opencode/sse/<user-id> -
       "args": [
         "-y",
         "mcp-remote",
-        "http://<your-server>:8765/mcp/auth/claude/sse"
+"http://<your-server>:8765/mcp/auth/claude/http"
       ]
     }
   }
@@ -811,7 +811,7 @@ For authenticated access:
   "github.copilot.chat.mcp.servers": {
     "openmemory": {
       "type": "sse",
-      "url": "http://<your-server>:8765/mcp/auth/copilot/sse"
+"url": "http://<your-server>:8765/mcp/auth/copilot/http"
     }
   }
 }
@@ -836,7 +836,7 @@ If your IntelliJ version supports MCP, configure the SSE endpoint in the MCP con
 | Transport | SSE |
 | URL (personal) | `http://<your-server>:8765/mcp/intellij/sse/<user-id>` |
 | URL (team) | `http://<your-server>:8765/mcp/intellij/sse/team-<project>` |
-| URL (authenticated) | `http://<your-server>:8765/mcp/auth/intellij/sse` |
+| URL (authenticated) | `http://<your-server>:8765/mcp/auth/intellij/http` |
 
 Refer to your IDE's documentation for the exact steps to add an MCP server.
 
@@ -876,7 +876,7 @@ Refer to your IDE's documentation for the exact steps to add an MCP server.
 {
   "mcpServers": {
     "openmemory": {
-      "url": "http://<your-server>:8765/mcp/auth/cursor/sse"
+"url": "http://<your-server>:8765/mcp/auth/cursor/http"
     }
   }
 }

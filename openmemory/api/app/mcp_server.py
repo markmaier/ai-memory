@@ -25,13 +25,12 @@ import anyio
 
 from app.database import SessionLocal
 from app.models import Memory, MemoryAccessLog, MemoryState, MemoryStatusHistory
-from app.utils.db import get_user_and_app
+from app.utils.db import get_or_create_user, get_user_and_app
 from app.utils.memory import get_memory_client
 from app.utils.permissions import check_memory_access_permissions
 from app.utils.auth import require_jwt_user
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
 from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
@@ -476,58 +475,77 @@ async def handle_sse_post_message(request: Request):
     await sse.handle_post_message(request.scope, request.receive, request._send)
 
 
-sse_auth = SseServerTransport("/mcp/auth/messages/")
-
-
-@mcp_router.get("/auth/{client_name}/sse")
-async def handle_sse_authenticated(request: Request):
-    """SSE endpoint with JWT-based user identity (no user_id in URL path)."""
-    try:
-        payload = await require_jwt_user(request)
-    except Exception as exc:
-        status = getattr(exc, "status_code", 401)
-        detail = getattr(exc, "detail", str(exc))
-        return JSONResponse(status_code=status, content={"detail": detail})
-
+@mcp_router.api_route("/auth/{client_name}/http", methods=["POST", "GET", "DELETE"])
+async def handle_streamable_http_authenticated(request: Request):
+    """Handle authenticated Streamable HTTP connections for a specific client."""
+    payload = await require_jwt_user(request)
     uid = payload["preferred_username"]
-    client_name = request.path_params.get("client_name")
 
     user_token = user_id_var.set(uid)
+    client_name = request.path_params.get("client_name")
     client_token = client_name_var.set(client_name or "")
 
-    try:
-        from app.database import SessionLocal
-        from app.utils.db import get_or_create_user
-        db = SessionLocal()
-        try:
-            get_or_create_user(
-                db,
-                uid,
-                name=payload.get("name"),
-                email=payload.get("email"),
-            )
-        finally:
-            db.close()
+    with SessionLocal() as db:
+        get_or_create_user(
+            db,
+            uid,
+            name=payload.get("name"),
+            email=payload.get("email"),
+        )
 
-        async with sse_auth.connect_sse(
-            request.scope,
-            request.receive,
-            request._send,
-        ) as (read_stream, write_stream):
-            await mcp._mcp_server.run(
-                read_stream,
-                write_stream,
-                mcp._mcp_server.create_initialization_options(),
-            )
+    # Intercept the ASGI messages the transport sends so we can return them
+    # as a single Response to FastAPI.  Without this, FastAPI would attempt to
+    # write its own response after the transport already wrote one.
+    response_started = False
+    response_status = 200
+    response_headers: list[tuple[bytes, bytes]] = []
+    response_body = bytearray()
+
+    async def capture_send(message):
+        nonlocal response_started, response_status
+        if message["type"] == "http.response.start":
+            response_started = True
+            response_status = message["status"]
+            response_headers.extend(message.get("headers", []))
+        elif message["type"] == "http.response.body":
+            response_body.extend(message.get("body", b""))
+
+    try:
+        transport = StreamableHTTPServerTransport(
+            mcp_session_id=None,
+            is_json_response_enabled=True,
+        )
+
+        async with anyio.create_task_group() as tg:
+
+            async def run_server(*, task_status=anyio.TASK_STATUS_IGNORED):
+                async with transport.connect() as (read_stream, write_stream):
+                    task_status.started()
+                    await mcp._mcp_server.run(
+                        read_stream,
+                        write_stream,
+                        mcp._mcp_server.create_initialization_options(),
+                        stateless=True,
+                    )
+
+            await tg.start(run_server)
+            await transport.handle_request(request.scope, request.receive, capture_send)
+            await transport.terminate()
+            tg.cancel_scope.cancel()
     finally:
         user_id_var.reset(user_token)
         client_name_var.reset(client_token)
 
+    if not response_started:
+        return Response(status_code=500, content=b"Transport did not produce a response")
 
-@mcp_router.post("/auth/messages/")
-async def handle_sse_post_message_authenticated(request: Request):
-    """POST handler for the authenticated SSE transport."""
-    await sse_auth.handle_post_message(request.scope, request.receive, request._send)
+    # Header dict conversion is safe here: the MCP transport in stateless JSON
+    # mode only emits single-valued headers (Content-Type, Content-Length).
+    return Response(
+        content=bytes(response_body),
+        status_code=response_status,
+        headers={k.decode(): v.decode() for k, v in response_headers},
+    )
 
 
 @mcp_router.api_route("/{client_name}/http/{user_id}", methods=["POST", "GET", "DELETE"])

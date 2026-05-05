@@ -52,7 +52,7 @@ export const Install = () => {
 
   const getMcpUrl = (clientName: string) =>
     oauthEnabled
-      ? `${URL}/mcp/auth/${clientName}/sse`
+      ? `${URL}/mcp/auth/${clientName}/http`
       : `${URL}/mcp/${clientName}/sse/${user}`;
 
   const handleCopy = async (tab: string, isMcp: boolean = false) => {
