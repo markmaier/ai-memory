@@ -31,7 +31,6 @@ from app.utils.permissions import check_memory_access_permissions
 from app.utils.auth import require_jwt_user
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
 from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
@@ -547,55 +546,6 @@ async def handle_streamable_http_authenticated(request: Request):
         status_code=response_status,
         headers={k.decode(): v.decode() for k, v in response_headers},
     )
-
-
-sse_auth = SseServerTransport("/mcp/auth/messages/")
-
-
-@mcp_router.get("/auth/{client_name}/sse")
-async def handle_sse_authenticated(request: Request):
-    """SSE endpoint with JWT-based user identity (no user_id in URL path)."""
-    try:
-        payload = await require_jwt_user(request)
-    except Exception as exc:
-        status = getattr(exc, "status_code", 401)
-        detail = getattr(exc, "detail", str(exc))
-        return JSONResponse(status_code=status, content={"detail": detail})
-
-    uid = payload["preferred_username"]
-    client_name = request.path_params.get("client_name")
-
-    user_token = user_id_var.set(uid)
-    client_token = client_name_var.set(client_name or "")
-
-    try:
-        with SessionLocal() as db:
-            get_or_create_user(
-                db,
-                uid,
-                name=payload.get("name"),
-                email=payload.get("email"),
-            )
-
-        async with sse_auth.connect_sse(
-            request.scope,
-            request.receive,
-            request._send,
-        ) as (read_stream, write_stream):
-            await mcp._mcp_server.run(
-                read_stream,
-                write_stream,
-                mcp._mcp_server.create_initialization_options(),
-            )
-    finally:
-        user_id_var.reset(user_token)
-        client_name_var.reset(client_token)
-
-
-@mcp_router.post("/auth/messages/")
-async def handle_sse_post_message_authenticated(request: Request):
-    """POST handler for the authenticated SSE transport."""
-    await sse_auth.handle_post_message(request.scope, request.receive, request._send)
 
 
 @mcp_router.api_route("/{client_name}/http/{user_id}", methods=["POST", "GET", "DELETE"])
