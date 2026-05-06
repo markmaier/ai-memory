@@ -191,3 +191,5 @@ qdrant_storage/
 testing.ipynb
 .weave/
 
+.gitnexus
+.sisyphus
