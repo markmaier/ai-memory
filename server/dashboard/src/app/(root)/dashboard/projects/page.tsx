@@ -174,6 +174,7 @@ export default function ProjectsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="owner">Owner</SelectItem>
+              <SelectItem value="writer">Writer</SelectItem>
               <SelectItem value="reader">Reader</SelectItem>
             </SelectContent>
           </Select>
@@ -327,6 +328,7 @@ export default function ProjectsPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="owner">Owner</SelectItem>
+                        <SelectItem value="writer">Writer</SelectItem>
                         <SelectItem value="reader">Reader</SelectItem>
                       </SelectContent>
                     </Select>

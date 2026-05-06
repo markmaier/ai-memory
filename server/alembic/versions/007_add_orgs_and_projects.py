@@ -51,6 +51,7 @@ def upgrade() -> None:
     )
 
     op.add_column("api_keys", sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id"), nullable=True))
+    op.add_column("request_logs", sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id"), nullable=True))
     op.drop_index("ix_users_only_one_admin", table_name="users")
 
     bind = op.get_bind()
@@ -101,6 +102,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_column("request_logs", "project_id")
     op.drop_column("api_keys", "project_id")
     op.drop_table("project_members")
     op.drop_table("projects")

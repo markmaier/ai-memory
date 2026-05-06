@@ -16,10 +16,15 @@ def _get_request_api_key() -> str:
     return headers.get("x-api-key", "")
 
 
+def _get_request_agent_id() -> str:
+    """Extract X-Agent-Id from the incoming HTTP request headers."""
+    headers = get_http_headers()
+    return headers.get("x-agent-id", "")
+
+
 def _build_client(api_key: str = "", api_url: str | None = None, agent_id: str = None) -> Mem0Client:
     resolved_key = api_key or settings.MEM0_API_KEY or _get_request_api_key()
-    # Per-call agent_id takes precedence over config, falls back to config's MEM0_AGENT_ID
-    resolved_agent = agent_id or settings.MEM0_AGENT_ID
+    resolved_agent = agent_id or settings.MEM0_AGENT_ID or _get_request_agent_id() or None
     return Mem0Client(
         base_url=api_url or settings.MEM0_API_URL,
         api_key=resolved_key,

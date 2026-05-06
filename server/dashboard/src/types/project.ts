@@ -15,7 +15,7 @@ export interface Project {
   updated_at: string;
 }
 
-export type ProjectRole = "owner" | "reader";
+export type ProjectRole = "owner" | "writer" | "reader";
 
 export interface ProjectMember {
   id: string;

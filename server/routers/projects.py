@@ -14,7 +14,7 @@ from schemas import MessageResponse
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
-ALLOWED_MEMBER_ROLES = {"owner", "reader"}
+ALLOWED_MEMBER_ROLES = {"owner", "writer", "reader"}
 REQUIRE_AUTH_DEP = cast(Any, require_auth)
 
 

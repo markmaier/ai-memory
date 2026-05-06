@@ -375,8 +375,8 @@ def generate_instructions(req: GenerateInstructionsRequest, _auth=Depends(verify
 @app.post("/memories", summary="Create memories")
 def add_memory(memory_create: MemoryCreate, ctx: ProjectContext = Depends(require_project_auth)):
     """Store new memories."""
-    if ctx.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner access required")
+    if ctx.role not in ("owner", "writer"):
+        raise HTTPException(status_code=403, detail="Write access required")
 
     if not any([memory_create.user_id, memory_create.agent_id, memory_create.run_id]):
         raise HTTPException(status_code=400, detail="At least one identifier (user_id, agent_id, run_id) is required.")
@@ -430,13 +430,13 @@ def get_all_memories(
     show_expired: bool = Query(False),
     ctx: ProjectContext = Depends(require_project_auth),
 ):
-    """Retrieve stored memories. Lists all memories when no identifier is provided (owner only)."""
+    """Retrieve stored memories. Lists all memories when no identifier is provided (owner/writer only)."""
     try:
         memory = get_memory_for_project(ctx.project.collection_name)
         if not any([user_id, run_id, agent_id]):
-            if ctx.role != "owner":
-                raise HTTPException(status_code=403, detail="Owner access required to list all memories.")
-            # Owner all-memory listing is intentionally raw; scoped get_all below applies expiry visibility.
+            if ctx.role not in ("owner", "writer"):
+                raise HTTPException(status_code=403, detail="Write access required to list all memories.")
+            # Owner/writer all-memory listing is intentionally raw; scoped get_all below applies expiry visibility.
             return _list_all_memories(memory=memory, limit=top_k if top_k is not None else ALL_MEMORIES_LIMIT)
         filters = {
             k: v for k, v in {"user_id": user_id, "run_id": run_id, "agent_id": agent_id}.items() if v
@@ -501,8 +501,8 @@ def search_memories(search_req: SearchRequest, ctx: ProjectContext = Depends(req
 @app.put("/memories/{memory_id}", summary="Update a memory")
 def update_memory(memory_id: str, updated_memory: MemoryUpdate, ctx: ProjectContext = Depends(require_project_auth)):
     """Update an existing memory."""
-    if ctx.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner access required")
+    if ctx.role not in ("owner", "writer"):
+        raise HTTPException(status_code=403, detail="Write access required")
 
     try:
         memory = get_memory_for_project(ctx.project.collection_name)
@@ -534,8 +534,8 @@ def memory_history(memory_id: str, ctx: ProjectContext = Depends(require_project
 @app.delete("/memories/{memory_id}", summary="Delete a memory", response_model=MessageResponse)
 def delete_memory(memory_id: str, ctx: ProjectContext = Depends(require_project_auth)):
     """Delete a specific memory by ID."""
-    if ctx.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner access required")
+    if ctx.role not in ("owner", "writer"):
+        raise HTTPException(status_code=403, detail="Write access required")
 
     try:
         memory = get_memory_for_project(ctx.project.collection_name)
@@ -554,9 +554,9 @@ def delete_all_memories(
     agent_id: Optional[str] = None,
     ctx: ProjectContext = Depends(require_project_auth),
 ):
-    """Delete all memories for a given identifier. Requires owner role."""
-    if ctx.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner access required")
+    """Delete all memories for a given identifier."""
+    if ctx.role not in ("owner", "writer"):
+        raise HTTPException(status_code=403, detail="Write access required")
 
     if not any([user_id, run_id, agent_id]):
         raise HTTPException(status_code=400, detail="At least one identifier is required.")

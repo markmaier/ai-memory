@@ -231,7 +231,7 @@ async def require_admin(
 class ProjectContext:
     user: User
     project: Project
-    role: str  # "owner" or "reader"
+    role: str  # "owner", "writer", or "reader"
 
 
 def _get_default_project(db: Session) -> Project | None:
