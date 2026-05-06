@@ -2,6 +2,7 @@
 from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 
 from mem0_mcp.client import Mem0Client
 from mem0_mcp.config import settings
@@ -9,8 +10,14 @@ from mem0_mcp.config import settings
 mcp = FastMCP("mem0-mcp-server")
 
 
+def _get_request_api_key() -> str:
+    """Extract X-API-Key from the incoming HTTP request headers."""
+    headers = get_http_headers()
+    return headers.get("x-api-key", "")
+
+
 def _build_client(api_key: str = "", api_url: str | None = None, agent_id: str = None) -> Mem0Client:
-    resolved_key = api_key or settings.MEM0_API_KEY
+    resolved_key = api_key or settings.MEM0_API_KEY or _get_request_api_key()
     # Per-call agent_id takes precedence over config, falls back to config's MEM0_AGENT_ID
     resolved_agent = agent_id or settings.MEM0_AGENT_ID
     return Mem0Client(

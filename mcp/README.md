@@ -5,9 +5,20 @@ Scaffold for the Mem0 MCP server.
 ## Environment
 
 - `MEM0_API_URL` — Mem0 API base URL (`http://localhost:8000` by default)
-- `MEM0_API_KEY` — default API key passed through to Mem0
+- `MEM0_API_KEY` — (optional) default API key passed through to Mem0. When unset, the server forwards the `X-API-Key` header from the incoming HTTP request to the Mem0 API.
+- `MEM0_AGENT_ID` — (optional) custom agent ID sent as `X-Agent-Id` header
 - `MCP_HOST` — bind host (`0.0.0.0` by default)
 - `MCP_PORT` — bind port (`8080` by default)
+
+## Authentication
+
+The MCP server authenticates with the Mem0 API server using the `X-API-Key` header. The key is resolved in priority order:
+
+1. `api_key` parameter passed per tool call
+2. `MEM0_API_KEY` environment variable
+3. `X-API-Key` header from the incoming HTTP request (passthrough)
+
+This allows deployments where each MCP client provides its own API key without configuring a shared secret on the MCP server.
 
 ## Local setup
 

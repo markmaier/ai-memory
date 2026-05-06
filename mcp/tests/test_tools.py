@@ -1,5 +1,6 @@
 # pyright: reportMissingImports=false
 import json
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -162,3 +163,172 @@ async def test_get_memory_includes_api_key_header(api_url: str, api_key: str):
 
     request = route.calls.last.request
     assert request.headers["X-API-Key"] == api_key
+
+
+# --- X-API-Key header passthrough tests ---
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_add_memories_uses_request_header_when_no_env_key(api_url: str):
+    route = respx.post(f"{api_url}/memories").mock(return_value=httpx.Response(200, json={"ok": True}))
+
+    with patch("mem0_mcp.server.settings") as mock_settings, patch(
+        "mem0_mcp.server.get_http_headers", return_value={"x-api-key": "from-header"}
+    ):
+        mock_settings.MEM0_API_KEY = ""
+        mock_settings.MEM0_API_URL = api_url
+        mock_settings.MEM0_AGENT_ID = ""
+
+        await add_memories(
+            messages=[{"role": "user", "content": "hi"}],
+            user_id="u1",
+            api_key="",
+            api_url=api_url,
+        )
+
+    request = route.calls.last.request
+    assert request.headers["X-API-Key"] == "from-header"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_search_memory_uses_request_header_when_no_env_key(api_url: str):
+    route = respx.post(f"{api_url}/search").mock(return_value=httpx.Response(200, json={"results": []}))
+
+    with patch("mem0_mcp.server.settings") as mock_settings, patch(
+        "mem0_mcp.server.get_http_headers", return_value={"x-api-key": "header-key"}
+    ):
+        mock_settings.MEM0_API_KEY = ""
+        mock_settings.MEM0_API_URL = api_url
+        mock_settings.MEM0_AGENT_ID = ""
+
+        await search_memory(query="test", user_id="u1", api_key="", api_url=api_url)
+
+    request = route.calls.last.request
+    assert request.headers["X-API-Key"] == "header-key"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_env_key_takes_precedence_over_request_header(api_url: str):
+    route = respx.post(f"{api_url}/memories").mock(return_value=httpx.Response(200, json={"ok": True}))
+
+    with patch("mem0_mcp.server.settings") as mock_settings, patch(
+        "mem0_mcp.server.get_http_headers", return_value={"x-api-key": "from-header"}
+    ):
+        mock_settings.MEM0_API_KEY = "env-key"
+        mock_settings.MEM0_API_URL = api_url
+        mock_settings.MEM0_AGENT_ID = ""
+
+        await add_memories(
+            messages=[{"role": "user", "content": "hi"}],
+            user_id="u1",
+            api_key="",
+            api_url=api_url,
+        )
+
+    request = route.calls.last.request
+    assert request.headers["X-API-Key"] == "env-key"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_explicit_api_key_takes_precedence_over_all(api_url: str):
+    route = respx.post(f"{api_url}/memories").mock(return_value=httpx.Response(200, json={"ok": True}))
+
+    with patch("mem0_mcp.server.settings") as mock_settings, patch(
+        "mem0_mcp.server.get_http_headers", return_value={"x-api-key": "from-header"}
+    ):
+        mock_settings.MEM0_API_KEY = "env-key"
+        mock_settings.MEM0_API_URL = api_url
+        mock_settings.MEM0_AGENT_ID = ""
+
+        await add_memories(
+            messages=[{"role": "user", "content": "hi"}],
+            user_id="u1",
+            api_key="explicit-key",
+            api_url=api_url,
+        )
+
+    request = route.calls.last.request
+    assert request.headers["X-API-Key"] == "explicit-key"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_empty_key_when_no_env_and_no_header(api_url: str):
+    route = respx.post(f"{api_url}/memories").mock(return_value=httpx.Response(200, json={"ok": True}))
+
+    with patch("mem0_mcp.server.settings") as mock_settings, patch(
+        "mem0_mcp.server.get_http_headers", return_value={}
+    ):
+        mock_settings.MEM0_API_KEY = ""
+        mock_settings.MEM0_API_URL = api_url
+        mock_settings.MEM0_AGENT_ID = ""
+
+        await add_memories(
+            messages=[{"role": "user", "content": "hi"}],
+            user_id="u1",
+            api_key="",
+            api_url=api_url,
+        )
+
+    request = route.calls.last.request
+    assert request.headers["X-API-Key"] == ""
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_memories_uses_request_header_when_no_env_key(api_url: str):
+    route = respx.get(f"{api_url}/memories").mock(return_value=httpx.Response(200, json={"results": []}))
+
+    with patch("mem0_mcp.server.settings") as mock_settings, patch(
+        "mem0_mcp.server.get_http_headers", return_value={"x-api-key": "list-header-key"}
+    ):
+        mock_settings.MEM0_API_KEY = ""
+        mock_settings.MEM0_API_URL = api_url
+        mock_settings.MEM0_AGENT_ID = ""
+
+        await list_memories(user_id="u1", api_key="", api_url=api_url)
+
+    request = route.calls.last.request
+    assert request.headers["X-API-Key"] == "list-header-key"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_delete_memory_uses_request_header_when_no_env_key(api_url: str):
+    route = respx.delete(f"{api_url}/memories/m-del").mock(
+        return_value=httpx.Response(200, json={"message": "deleted"})
+    )
+
+    with patch("mem0_mcp.server.settings") as mock_settings, patch(
+        "mem0_mcp.server.get_http_headers", return_value={"x-api-key": "del-header-key"}
+    ):
+        mock_settings.MEM0_API_KEY = ""
+        mock_settings.MEM0_API_URL = api_url
+        mock_settings.MEM0_AGENT_ID = ""
+
+        await delete_memory(memory_id="m-del", user_id="u1", api_key="", api_url=api_url)
+
+    request = route.calls.last.request
+    assert request.headers["X-API-Key"] == "del-header-key"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_memory_uses_request_header_when_no_env_key(api_url: str):
+    route = respx.get(f"{api_url}/memories/m-get").mock(return_value=httpx.Response(200, json={"id": "m-get"}))
+
+    with patch("mem0_mcp.server.settings") as mock_settings, patch(
+        "mem0_mcp.server.get_http_headers", return_value={"x-api-key": "get-header-key"}
+    ):
+        mock_settings.MEM0_API_KEY = ""
+        mock_settings.MEM0_API_URL = api_url
+        mock_settings.MEM0_AGENT_ID = ""
+
+        await get_memory(memory_id="m-get", user_id="u1", api_key="", api_url=api_url)
+
+    request = route.calls.last.request
+    assert request.headers["X-API-Key"] == "get-header-key"

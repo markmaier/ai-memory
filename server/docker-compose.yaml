@@ -81,7 +81,6 @@ services:
       - mem0_network
     environment:
       - MEM0_API_URL=http://mem0:8000
-      - MEM0_API_KEY=${ADMIN_API_KEY}
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8080
     depends_on:
