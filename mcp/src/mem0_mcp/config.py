@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     MEM0_API_URL: str = "http://localhost:8000"
     MEM0_API_KEY: str = ""
+    MEM0_AGENT_ID: str = ""  # Custom agent ID sent as X-Agent-Id header
     MCP_HOST: str = "0.0.0.0"
     MCP_PORT: int = 8080
 

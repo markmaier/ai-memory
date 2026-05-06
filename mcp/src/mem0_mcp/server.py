@@ -9,9 +9,15 @@ from mem0_mcp.config import settings
 mcp = FastMCP("mem0-mcp-server")
 
 
-def _build_client(api_key: str = "", api_url: str | None = None) -> Mem0Client:
+def _build_client(api_key: str = "", api_url: str | None = None, agent_id: str = None) -> Mem0Client:
     resolved_key = api_key or settings.MEM0_API_KEY
-    return Mem0Client(base_url=api_url or settings.MEM0_API_URL, api_key=resolved_key)
+    # Per-call agent_id takes precedence over config, falls back to config's MEM0_AGENT_ID
+    resolved_agent = agent_id or settings.MEM0_AGENT_ID
+    return Mem0Client(
+        base_url=api_url or settings.MEM0_API_URL,
+        api_key=resolved_key,
+        agent_id=resolved_agent,
+    )
 
 
 async def _close_client(client: Mem0Client) -> None:
@@ -24,9 +30,10 @@ async def add_memories(
     user_id: str,
     api_key: str = "",
     api_url: str | None = None,
+    agent_id: str = "",
 ) -> dict[str, Any]:
     """Add memories using Mem0 API POST /memories."""
-    client = _build_client(api_key=api_key, api_url=api_url)
+    client = _build_client(api_key=api_key, api_url=api_url, agent_id=agent_id or None)
     try:
         return await client.add_memories(messages=messages, user_id=user_id)
     finally:
@@ -40,9 +47,10 @@ async def search_memory(
     api_key: str = "",
     limit: int = 10,
     api_url: str | None = None,
+    agent_id: str = "",
 ) -> dict[str, Any]:
     """Search memories using Mem0 API POST /search."""
-    client = _build_client(api_key=api_key, api_url=api_url)
+    client = _build_client(api_key=api_key, api_url=api_url, agent_id=agent_id or None)
     try:
         return await client.search_memory(query=query, user_id=user_id, limit=limit)
     finally:
@@ -54,9 +62,10 @@ async def list_memories(
     user_id: str,
     api_key: str = "",
     api_url: str | None = None,
+    agent_id: str = "",
 ) -> dict[str, Any]:
     """List memories using Mem0 API GET /memories."""
-    client = _build_client(api_key=api_key, api_url=api_url)
+    client = _build_client(api_key=api_key, api_url=api_url, agent_id=agent_id or None)
     try:
         return await client.list_memories(user_id=user_id)
     finally:
