@@ -2,12 +2,12 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from auth import require_admin, verify_auth
+from auth import ProjectContext, require_project_auth
 from errors import upstream_error
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from schemas import MessageResponse
-from server_state import get_memory_instance
+from server_state import get_memory_for_project
 
 router = APIRouter(prefix="/entities", tags=["entities"])
 
@@ -25,8 +25,8 @@ class Entity(BaseModel):
     updated_at: Optional[datetime] = None
 
 
-def _iter_payloads() -> list[dict[str, Any]]:
-    results = get_memory_instance().vector_store.list(top_k=SCAN_LIMIT)
+def _iter_payloads(collection_name: str) -> list[dict[str, Any]]:
+    results = get_memory_for_project(collection_name).vector_store.list(top_k=SCAN_LIMIT)
     rows = results[0] if results and isinstance(results, list) and isinstance(results[0], list) else results or []
     return [getattr(row, "payload", None) or {} for row in rows]
 
@@ -41,12 +41,12 @@ def _parse_timestamp(value: Any) -> Optional[datetime]:
 
 
 @router.get("", response_model=list[Entity])
-def list_entities(_auth=Depends(verify_auth)):
+def list_entities(ctx: ProjectContext = Depends(require_project_auth)):
     buckets: dict[tuple[EntityType, str], dict[str, Any]] = defaultdict(
         lambda: {"total_memories": 0, "created_at": None, "updated_at": None}
     )
 
-    for payload in _iter_payloads():
+    for payload in _iter_payloads(ctx.project.collection_name):
         created = _parse_timestamp(payload.get("created_at"))
         updated = _parse_timestamp(payload.get("updated_at")) or created
 
@@ -68,9 +68,9 @@ def list_entities(_auth=Depends(verify_auth)):
 
 
 @router.delete("/{entity_type}/{entity_id}", response_model=MessageResponse)
-def delete_entity(entity_type: EntityType, entity_id: str, _auth=Depends(require_admin)):
+def delete_entity(entity_type: EntityType, entity_id: str, ctx: ProjectContext = Depends(require_project_auth)):
     try:
-        get_memory_instance().delete_all(**{TYPE_TO_FIELD[entity_type]: entity_id})
+        get_memory_for_project(ctx.project.collection_name).delete_all(**{TYPE_TO_FIELD[entity_type]: entity_id})
     except Exception:
         raise upstream_error()
     return MessageResponse(message="Entity deleted")

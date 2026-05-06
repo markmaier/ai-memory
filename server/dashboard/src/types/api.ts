@@ -13,6 +13,8 @@ export interface ApiKey {
   key_prefix: string;
   created_at: string;
   last_used_at: string | null;
+  project_id: string | null;
+  project_name: string | null;
 }
 
 export interface ApiKeyCreateResponse {

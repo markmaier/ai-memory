@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -26,8 +27,13 @@ import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/error-message";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { ApiKey, ApiKeyCreateResponse } from "@/types/api";
+import { RootState } from "@/store/store";
 
 export default function ApiKeysPage() {
+  const activeProjectId = useSelector(
+    (state: RootState) => state.project.activeProjectId,
+  );
+
   const [createOpen, setCreateOpen] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [newKey, setNewKey] = useState("");
@@ -40,16 +46,24 @@ export default function ApiKeysPage() {
     refetch,
   } = useApiQuery<ApiKey[]>(
     async () => {
-      const res = await api.get<ApiKey[]>(API_KEY_ENDPOINTS.BASE);
+      const url = activeProjectId
+        ? `${API_KEY_ENDPOINTS.BASE}?project_id=${activeProjectId}`
+        : API_KEY_ENDPOINTS.BASE;
+      const res = await api.get<ApiKey[]>(url);
       return res.data ?? [];
     },
     { errorToast: "Failed to load API keys", initialData: [] },
   );
 
+  useEffect(() => {
+    void refetch();
+  }, [activeProjectId, refetch]);
+
   const handleCreate = async () => {
     try {
       const res = await api.post<ApiKeyCreateResponse>(API_KEY_ENDPOINTS.BASE, {
         label: newLabel,
+        project_id: activeProjectId,
       });
       setNewKey(res.data.key);
       void refetch();
@@ -96,6 +110,12 @@ export default function ApiKeysPage() {
       render: (value: string) => (
         <code className="text-xs font-mono">{value}...</code>
       ),
+    },
+    {
+      key: "project_name" as keyof ApiKey,
+      label: "Project",
+      width: 120,
+      render: (value: string | null) => value ?? "—",
     },
     {
       key: "created_at" as keyof ApiKey,

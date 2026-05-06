@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
 import { format, formatDistanceToNow } from "date-fns";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,8 @@ import { api } from "@/utils/api";
 import { REQUEST_ENDPOINTS } from "@/utils/api-endpoints";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { ApiRequestLog } from "@/types/api";
+import { RootState } from "@/store/store";
+import { useAuth } from "@/hooks/use-auth";
 
 type RequestLog = {
   id: string;
@@ -81,8 +84,13 @@ const normalizeLog = (entry: ApiRequestLog): RequestLog => {
 };
 
 export default function RequestsPage() {
+  const activeProjectId = useSelector(
+    (state: RootState) => state.project.activeProjectId,
+  );
+  const { isAdmin } = useAuth();
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [showAll, setShowAll] = useState(false);
 
   const {
     data: logs = [],
@@ -91,14 +99,27 @@ export default function RequestsPage() {
     refetch,
   } = useApiQuery<RequestLog[]>(
     async () => {
+      const params: { limit: number; project_id?: string } = {
+        limit: REQUEST_LOG_LIMIT,
+      };
+
+      if (activeProjectId && (!isAdmin || !showAll)) {
+        params.project_id = activeProjectId;
+      }
+
       const res = await api.get<ApiRequestLog[]>(REQUEST_ENDPOINTS.BASE, {
-        params: { limit: REQUEST_LOG_LIMIT },
+        params,
       });
       setLastUpdated(new Date().toISOString());
       return (res.data ?? []).map(normalizeLog);
     },
     { errorToast: "Failed to load request logs", initialData: [] },
   );
+
+  useEffect(() => {
+    setPage(0);
+    void refetch();
+  }, [activeProjectId, isAdmin, showAll, refetch]);
 
   const totalRequests = logs.length;
   const successfulRequests = logs.filter((log) => log.statusCode < 400).length;
@@ -196,6 +217,18 @@ export default function RequestsPage() {
         </Button>
       </div>
 
+      {isAdmin && (
+        <div className="flex items-center gap-2">
+          <Button
+            variant={showAll ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowAll((value) => !value)}
+          >
+            Show all requests
+          </Button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {[
           { label: "Total Requests", value: totalRequests },
@@ -231,8 +264,8 @@ export default function RequestsPage() {
         <TableSkeleton rows={6} columns={6} />
       ) : logs.length === 0 ? (
         <EmptyState
-          title="No request logs yet"
-          description="Requests will appear here once your instance receives traffic."
+          title="No requests for this project yet"
+          description="Requests will appear here once this project receives traffic."
           image="requests"
         />
       ) : (

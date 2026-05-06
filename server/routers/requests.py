@@ -19,6 +19,7 @@ class RequestLogItem(BaseModel):
     status_code: int
     latency_ms: float
     auth_type: str
+    project_id: uuid.UUID | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -32,15 +33,18 @@ def list_requests(
     _auth=Depends(require_admin),
     db: Session = Depends(get_db),
     limit: int = Query(default=50, ge=1, le=200),
+    project_id: str | None = Query(default=None),
 ):
-    logs = (
-        db.execute(
-            select(RequestLog)
-            .where(RequestLog.auth_type.in_(API_KEY_AUTH_TYPES))
-            .order_by(RequestLog.created_at.desc())
-            .limit(limit)
-        )
-        .scalars()
-        .all()
-    )
+    stmt = select(RequestLog).where(RequestLog.auth_type.in_(API_KEY_AUTH_TYPES))
+
+    if project_id is not None:
+        try:
+            pid = uuid.UUID(project_id)
+        except (TypeError, ValueError):
+            pid = None
+        if pid is not None:
+            stmt = stmt.where(RequestLog.project_id == pid)
+
+    stmt = stmt.order_by(RequestLog.created_at.desc()).limit(limit)
+    logs = db.execute(stmt).scalars().all()
     return logs

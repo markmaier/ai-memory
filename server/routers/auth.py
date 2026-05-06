@@ -1,3 +1,4 @@
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -18,7 +19,7 @@ from auth import (
     verify_password,
 )
 from db import get_db
-from models import User
+from models import Organization, Project, ProjectMember, User
 from rate_limit import limiter
 from schemas import MessageResponse
 from telemetry import capture_admin_registered, capture_onboarding_completed
@@ -77,6 +78,7 @@ class UserResponse(BaseModel):
     email: str
     role: str
     created_at: datetime
+    has_projects: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -94,27 +96,49 @@ def setup_status(db: Session = Depends(get_db)):
 @router.post("/register", response_model=TokenResponse)
 @limiter.limit("5/minute")
 def register(request: Request, body: RegisterRequest, db: Session = Depends(get_db)):
-    """Create the first admin account. Blocked once any user exists."""
+    """Create the first admin account, then allow additional member accounts."""
     _require_password_length(body.password)
 
-    if db.scalar(select(func.count(User.id))) > 0:
-        raise HTTPException(status_code=403, detail="Registration is closed. An admin account already exists.")
+    user_count = db.scalar(select(func.count(User.id))) or 0
 
     user = User(
         name=body.name,
         email=body.email,
         password_hash=hash_password(body.password),
-        role="admin",
+        role="admin" if user_count == 0 else "member",
     )
     db.add(user)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=403, detail="Registration is closed. An admin account already exists.")
+        raise HTTPException(status_code=409, detail="Email already registered.")
     db.refresh(user)
 
-    capture_admin_registered(email=body.email)
+    if user.role == "admin":
+        # First admin: auto-create Organization + Default project + owner membership
+        org = Organization(name="My Organization")
+        db.add(org)
+        db.flush()
+
+        collection_name = os.environ.get("POSTGRES_COLLECTION_NAME", "memories")
+        project = Project(
+            org_id=org.id,
+            name="Default",
+            collection_name=collection_name,
+        )
+        db.add(project)
+        db.flush()
+
+        membership = ProjectMember(
+            project_id=project.id,
+            user_id=user.id,
+            role="owner",
+        )
+        db.add(membership)
+        db.commit()
+
+        capture_admin_registered(email=body.email)
 
     return TokenResponse(
         access_token=create_access_token(str(user.id), user.role),
@@ -165,8 +189,9 @@ def refresh(request: Request, body: RefreshRequest, db: Session = Depends(get_db
 
 
 @router.get("/me", response_model=UserResponse)
-def me(user: User = Depends(require_auth)):
-    return user
+def me(user: User = Depends(require_auth), db: Session = Depends(get_db)):
+    has_projects = (db.scalar(select(func.count(ProjectMember.user_id)).where(ProjectMember.user_id == user.id)) or 0) > 0
+    return UserResponse.model_validate(user, from_attributes=True).model_copy(update={"has_projects": has_projects})
 
 
 @router.patch("/me", response_model=UserResponse)

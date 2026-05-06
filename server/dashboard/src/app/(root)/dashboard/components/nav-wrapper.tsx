@@ -1,6 +1,7 @@
 "use client";
 
 import { MainNav } from "./main-nav";
+import { ProjectSwitcher } from "./project-switcher";
 import { PanelRight, LogOut, Settings, HelpCircle } from "lucide-react";
 import { useCallback } from "react";
 import {
@@ -72,6 +73,8 @@ export default function NavWrapper() {
               )}
             </div>
           </div>
+
+          {!isSidebarCollapsed && <ProjectSwitcher />}
 
           <MainNav className="w-full" />
         </div>

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
 import { Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -25,12 +26,16 @@ import { api } from "@/utils/api";
 import { MEMORY_ENDPOINTS } from "@/utils/api-endpoints";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { Memory } from "@/types/api";
+import { RootState } from "@/store/store";
 
 const PAGE_SIZE = 20;
 // Keep in sync with ALL_MEMORIES_LIMIT in server/main.py.
 const MEMORY_FETCH_LIMIT = 1000;
 
 export default function MemoriesPage() {
+  const activeProjectId = useSelector(
+    (state: RootState) => state.project.activeProjectId,
+  );
   const [userId, setUserId] = useState("");
   const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
   const [memoryToDelete, setMemoryToDelete] = useState<Memory | null>(null);
@@ -52,6 +57,11 @@ export default function MemoriesPage() {
     },
     { errorToast: "Failed to load memories", initialData: [] },
   );
+
+  useEffect(() => {
+    setPage(0);
+    void refetch();
+  }, [activeProjectId, refetch]);
 
   const totalPages = Math.ceil(memories.length / PAGE_SIZE);
   const paginatedMemories = memories.slice(
@@ -129,8 +139,8 @@ export default function MemoriesPage() {
         <TableSkeleton rows={5} columns={4} />
       ) : memories.length === 0 ? (
         <EmptyState
-          title="No memories yet"
-          description="Create your first memory by sending a POST /memories request."
+          title="No memories in this project yet"
+          description="Create your first memory in this project by sending a POST /memories request."
         >
           <pre className="text-xs text-left bg-surface-default-secondary p-3 rounded font-mono overflow-x-auto mt-3 max-w-lg">
             {`curl -X POST ${apiUrl}/memories \\

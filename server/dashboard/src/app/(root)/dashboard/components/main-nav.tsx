@@ -7,6 +7,7 @@ import {
   ChartLine,
   ChevronDown,
   FolderInput,
+  FolderKanban,
   GalleryVerticalEnd,
   KeyRound,
   Settings,
@@ -202,6 +203,12 @@ export function MainNav({
                     url: "/dashboard/api-keys",
                     icon: KeyRound,
                     active: pathname === "/dashboard/api-keys",
+                  },
+                  {
+                    title: "Projects",
+                    url: "/dashboard/projects",
+                    icon: FolderKanban,
+                    active: pathname === "/dashboard/projects",
                   },
                   {
                     title: "Configuration",

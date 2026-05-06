@@ -32,3 +32,11 @@ export const ENTITY_ENDPOINTS = {
   BY_ID: (type: string, id: string) =>
     `/entities/${type}/${encodeURIComponent(id)}`,
 } as const;
+
+export const PROJECT_ENDPOINTS = {
+  BASE: "/projects",
+  BY_ID: (id: string) => `/projects/${id}`,
+  MEMBERS: (id: string) => `/projects/${id}/members`,
+  MEMBER_BY_ID: (projectId: string, memberId: string) =>
+    `/projects/${projectId}/members/${memberId}`,
+} as const;

@@ -2,10 +2,10 @@ import asyncio
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import telemetry
-from auth import ADMIN_API_KEY, AUTH_DISABLED, JWT_SECRET, require_admin, verify_auth
+from auth import ADMIN_API_KEY, AUTH_DISABLED, JWT_SECRET, ProjectContext, require_admin, require_project_auth, verify_auth
 from db import SessionLocal
 from dotenv import load_dotenv
 from errors import (
@@ -26,17 +26,20 @@ from rate_limit import limiter
 from routers import api_keys as api_keys_router
 from routers import auth as auth_router
 from routers import entities as entities_router
+from routers import projects as projects_router  # pyright: ignore[reportAttributeAccessIssue]
 from routers import requests as requests_router
 from schemas import MessageResponse
 from server_state import (
+    drop_memory_collection,
     get_current_config,
+    get_memory_for_project,
     get_memory_instance,
     initialize_state,
     set_session_factory,
     update_config,
 )
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler  # pyright: ignore[reportMissingImports]
+from slowapi.errors import RateLimitExceeded  # pyright: ignore[reportMissingImports]
 from sqlalchemy import func, select
 
 load_dotenv()
@@ -67,7 +70,7 @@ def _warn_if_unconfigured() -> None:
     an admin key or admin user exists. Surface the fix before the support tickets."""
     try:
         with SessionLocal() as session:
-            if session.scalar(select(func.count(User.id))) > 0:
+            if (session.scalar(select(func.count(User.id))) or 0) > 0:
                 return
     except Exception:
         return
@@ -155,7 +158,7 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_exception_handler(UpstreamError, upstream_error_handler)
+app.add_exception_handler(UpstreamError, cast(Any, upstream_error_handler))
 DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
@@ -168,6 +171,7 @@ app.add_middleware(
 app.include_router(auth_router.router)
 app.include_router(api_keys_router.router)
 app.include_router(entities_router.router)
+app.include_router(projects_router.router)
 app.include_router(requests_router.router)
 
 
@@ -267,7 +271,9 @@ def _should_log_request(request: Request) -> bool:
     return not path.startswith(SKIPPED_REQUEST_LOG_PREFIXES)
 
 
-def _persist_request_log(method: str, path: str, status_code: int, latency_ms: float, auth_type: str) -> None:
+def _persist_request_log(
+    method: str, path: str, status_code: int, latency_ms: float, auth_type: str, project_id: str | None = None
+) -> None:
     session = SessionLocal()
 
     try:
@@ -278,6 +284,7 @@ def _persist_request_log(method: str, path: str, status_code: int, latency_ms: f
                 status_code=status_code,
                 latency_ms=latency_ms,
                 auth_type=auth_type,
+                project_id=project_id,
             )
         )
         session.commit()
@@ -307,6 +314,7 @@ async def log_requests(request: Request, call_next):
     finally:
         request_id_var.reset(token)
         if _should_log_request(request):
+            project_id = getattr(request.state, "project_id", None)
             asyncio.get_running_loop().run_in_executor(
                 None,
                 _persist_request_log,
@@ -315,6 +323,7 @@ async def log_requests(request: Request, call_next):
                 status_code,
                 round((time.perf_counter() - start) * 1000, 2),
                 getattr(request.state, "auth_type", "none"),
+                project_id,
             )
 
 
@@ -364,14 +373,18 @@ def generate_instructions(req: GenerateInstructionsRequest, _auth=Depends(verify
 
 
 @app.post("/memories", summary="Create memories")
-def add_memory(memory_create: MemoryCreate, _auth=Depends(verify_auth)):
+def add_memory(memory_create: MemoryCreate, ctx: ProjectContext = Depends(require_project_auth)):
     """Store new memories."""
+    if ctx.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner access required")
+
     if not any([memory_create.user_id, memory_create.agent_id, memory_create.run_id]):
         raise HTTPException(status_code=400, detail="At least one identifier (user_id, agent_id, run_id) is required.")
 
     params = {k: v for k, v in memory_create.model_dump().items() if v is not None and k != "messages"}
     try:
-        response = get_memory_instance().add(messages=[m.model_dump() for m in memory_create.messages], **params)
+        memory = get_memory_for_project(ctx.project.collection_name)
+        response = memory.add(messages=[m.model_dump() for m in memory_create.messages], **params)
         if response.get("results"):
             telemetry.log_dashboard_nudge_once(DASHBOARD_URL)
         return JSONResponse(content=response)
@@ -401,8 +414,8 @@ def _serialize_memory(row: Any) -> Dict[str, Any]:
     }
 
 
-def _list_all_memories(limit: int = ALL_MEMORIES_LIMIT) -> Dict[str, Any]:
-    results = get_memory_instance().vector_store.list(top_k=limit)
+def _list_all_memories(memory: Any, limit: int = ALL_MEMORIES_LIMIT) -> Dict[str, Any]:
+    results = memory.vector_store.list(top_k=limit)
     rows = results[0] if results and isinstance(results, list) and isinstance(results[0], list) else results or []
     return {"results": [_serialize_memory(row) for row in rows]}
 
@@ -415,16 +428,16 @@ def get_all_memories(
     agent_id: Optional[str] = None,
     top_k: Optional[int] = Query(None, ge=0, le=ALL_MEMORIES_LIMIT),
     show_expired: bool = Query(False),
-    _auth=Depends(verify_auth),
+    ctx: ProjectContext = Depends(require_project_auth),
 ):
-    """Retrieve stored memories. Lists all memories when no identifier is provided (admin only)."""
+    """Retrieve stored memories. Lists all memories when no identifier is provided (owner only)."""
     try:
+        memory = get_memory_for_project(ctx.project.collection_name)
         if not any([user_id, run_id, agent_id]):
-            auth_type = getattr(request.state, "auth_type", "none")
-            if _auth is not None and _auth.role != "admin" and auth_type not in {"admin_api_key", "disabled"}:
-                raise HTTPException(status_code=403, detail="Admin role required to list all memories.")
-            # Admin all-memory listing is intentionally raw; scoped get_all below applies expiry visibility.
-            return _list_all_memories(limit=top_k if top_k is not None else ALL_MEMORIES_LIMIT)
+            if ctx.role != "owner":
+                raise HTTPException(status_code=403, detail="Owner access required to list all memories.")
+            # Owner all-memory listing is intentionally raw; scoped get_all below applies expiry visibility.
+            return _list_all_memories(memory=memory, limit=top_k if top_k is not None else ALL_MEMORIES_LIMIT)
         filters = {
             k: v for k, v in {"user_id": user_id, "run_id": run_id, "agent_id": agent_id}.items() if v
         }
@@ -432,7 +445,7 @@ def get_all_memories(
         if top_k is not None:
             params["top_k"] = top_k
         params["show_expired"] = show_expired
-        return get_memory_instance().get_all(**params)
+        return memory.get_all(**params)
     except HTTPException:
         raise
     except Exception:
@@ -440,18 +453,20 @@ def get_all_memories(
 
 
 @app.get("/memories/{memory_id}", summary="Get a memory")
-def get_memory(memory_id: str, _auth=Depends(verify_auth)):
+def get_memory(memory_id: str, ctx: ProjectContext = Depends(require_project_auth)):
     """Retrieve a specific memory by ID."""
     try:
-        return get_memory_instance().get(memory_id)
+        memory = get_memory_for_project(ctx.project.collection_name)
+        return memory.get(memory_id)
     except Exception:
         raise upstream_error()
 
 
 @app.post("/search", summary="Search memories")
-def search_memories(search_req: SearchRequest, _auth=Depends(verify_auth)):
+def search_memories(search_req: SearchRequest, ctx: ProjectContext = Depends(require_project_auth)):
     """Search for memories based on a query."""
     try:
+        memory = get_memory_for_project(ctx.project.collection_name)
         filters = search_req.filters or {}
         deprecated_keys = []
         for entity_key in ("user_id", "agent_id", "run_id"):
@@ -474,7 +489,7 @@ def search_memories(search_req: SearchRequest, _auth=Depends(verify_auth)):
             params["explain"] = search_req.explain
         if search_req.show_expired is not None:
             params["show_expired"] = search_req.show_expired
-        return get_memory_instance().search(query=search_req.query, filters=filters, **params)
+        return memory.search(query=search_req.query, filters=filters, **params)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
@@ -484,9 +499,13 @@ def search_memories(search_req: SearchRequest, _auth=Depends(verify_auth)):
 
 
 @app.put("/memories/{memory_id}", summary="Update a memory")
-def update_memory(memory_id: str, updated_memory: MemoryUpdate, _auth=Depends(verify_auth)):
+def update_memory(memory_id: str, updated_memory: MemoryUpdate, ctx: ProjectContext = Depends(require_project_auth)):
     """Update an existing memory."""
+    if ctx.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner access required")
+
     try:
+        memory = get_memory_for_project(ctx.project.collection_name)
         fields_set = getattr(updated_memory, "model_fields_set", getattr(updated_memory, "__fields_set__", set()))
         params = {"memory_id": memory_id}
         if "text" in fields_set:
@@ -495,7 +514,7 @@ def update_memory(memory_id: str, updated_memory: MemoryUpdate, _auth=Depends(ve
             params["metadata"] = updated_memory.metadata
         if "expiration_date" in fields_set:
             params["expiration_date"] = updated_memory.expiration_date
-        return get_memory_instance().update(**params)
+        return memory.update(**params)
     except (ValueError, Mem0ValidationError) as e:
         raise _client_error(e)
     except Exception:
@@ -503,19 +522,24 @@ def update_memory(memory_id: str, updated_memory: MemoryUpdate, _auth=Depends(ve
 
 
 @app.get("/memories/{memory_id}/history", summary="Get memory history")
-def memory_history(memory_id: str, _auth=Depends(verify_auth)):
+def memory_history(memory_id: str, ctx: ProjectContext = Depends(require_project_auth)):
     """Retrieve memory history."""
     try:
-        return get_memory_instance().history(memory_id=memory_id)
+        memory = get_memory_for_project(ctx.project.collection_name)
+        return memory.history(memory_id=memory_id)
     except Exception:
         raise upstream_error()
 
 
 @app.delete("/memories/{memory_id}", summary="Delete a memory", response_model=MessageResponse)
-def delete_memory(memory_id: str, _auth=Depends(verify_auth)):
+def delete_memory(memory_id: str, ctx: ProjectContext = Depends(require_project_auth)):
     """Delete a specific memory by ID."""
+    if ctx.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner access required")
+
     try:
-        get_memory_instance().delete(memory_id=memory_id)
+        memory = get_memory_for_project(ctx.project.collection_name)
+        memory.delete(memory_id=memory_id)
         return MessageResponse(message="Memory deleted successfully")
     except (ValueError, Mem0ValidationError) as e:
         raise _client_error(e)
@@ -528,26 +552,36 @@ def delete_all_memories(
     user_id: Optional[str] = None,
     run_id: Optional[str] = None,
     agent_id: Optional[str] = None,
-    _auth=Depends(require_admin),
+    ctx: ProjectContext = Depends(require_project_auth),
 ):
-    """Delete all memories for a given identifier. Requires admin role."""
+    """Delete all memories for a given identifier. Requires owner role."""
+    if ctx.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner access required")
+
     if not any([user_id, run_id, agent_id]):
         raise HTTPException(status_code=400, detail="At least one identifier is required.")
     try:
+        memory = get_memory_for_project(ctx.project.collection_name)
         params = {
             k: v for k, v in {"user_id": user_id, "run_id": run_id, "agent_id": agent_id}.items() if v
         }
-        get_memory_instance().delete_all(**params)
+        memory.delete_all(**params)
         return MessageResponse(message="All relevant memories deleted")
     except Exception:
         raise upstream_error()
 
 
 @app.post("/reset", summary="Reset all memories")
-def reset_memory(_auth=Depends(require_admin)):
-    """Completely reset stored memories. Requires admin role."""
+def reset_memory(ctx: ProjectContext = Depends(require_project_auth)):
+    """Completely reset stored memories. Requires owner role."""
+    if ctx.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner access required")
+
     try:
-        get_memory_instance().reset()
+        collection_name = ctx.project.collection_name
+        memory = get_memory_for_project(collection_name)
+        memory.reset()
+        drop_memory_collection(collection_name)
         return {"message": "All memories reset"}
     except Exception:
         raise upstream_error()

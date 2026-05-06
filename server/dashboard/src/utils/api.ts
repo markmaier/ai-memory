@@ -1,4 +1,5 @@
 import axios, { AxiosError, AxiosInstance } from "axios";
+import store from "@/store/store";
 
 let cachedToken: string | null = null;
 const LOGIN_PATH = "/login";
@@ -49,6 +50,13 @@ const createApi = (): AxiosInstance & {
         config.headers = config.headers ?? {};
         config.headers.Authorization = `Bearer ${cachedToken}`;
       }
+
+      const activeProjectId = store.getState().project?.activeProjectId;
+      if (activeProjectId) {
+        config.headers = config.headers ?? {};
+        config.headers["X-Project-Id"] = activeProjectId;
+      }
+
       return config;
     },
     (error) => {

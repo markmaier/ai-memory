@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
 import { Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -16,8 +17,12 @@ import { ENTITY_ENDPOINTS } from "@/utils/api-endpoints";
 import { getErrorMessage } from "@/lib/error-message";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { Entity } from "@/types/api";
+import { RootState } from "@/store/store";
 
 export default function EntitiesPage() {
+  const activeProjectId = useSelector(
+    (state: RootState) => state.project.activeProjectId,
+  );
   const [entityToDelete, setEntityToDelete] = useState<Entity | null>(null);
 
   const {
@@ -31,6 +36,10 @@ export default function EntitiesPage() {
     },
     { errorToast: "Failed to load entities", initialData: [] },
   );
+
+  useEffect(() => {
+    void refetch();
+  }, [activeProjectId, refetch]);
 
   const handleDelete = async () => {
     if (!entityToDelete) return;
@@ -107,7 +116,7 @@ export default function EntitiesPage() {
         <TableSkeleton rows={5} columns={5} />
       ) : entities.length === 0 ? (
         <EmptyState
-          title="No entities yet"
+          title="No entities in this project yet"
           description="Entities appear once memories are stored with a user_id, agent_id, or run_id."
         />
       ) : (

@@ -1,13 +1,14 @@
 import os
 import secrets
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from db import get_db
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from models import APIKey, RefreshTokenJti, User
+from models import APIKey, Project, ProjectMember, RefreshTokenJti, User
 from passlib.context import CryptContext
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -117,13 +118,18 @@ def _resolve_user_from_jwt(token: str, db: Session) -> User:
     payload = decode_token(token)
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type.")
-    user = db.get(User, payload.get("sub"))
+    sub = payload.get("sub")
+    try:
+        user_id = uuid.UUID(sub) if sub else None
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid token subject.")
+    user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="User not found.")
     return user
 
 
-def _resolve_user_from_api_key(key: str, db: Session) -> User:
+def _resolve_user_from_api_key(key: str, db: Session, request: Request) -> User:
     prefix = key[:12] if len(key) >= 12 else key
     candidates = (
         db.execute(select(APIKey).where(APIKey.key_prefix == prefix, APIKey.revoked_at.is_(None))).scalars().all()
@@ -133,6 +139,7 @@ def _resolve_user_from_api_key(key: str, db: Session) -> User:
         if verify_api_key_hash(key, candidate.key_hash):
             candidate.last_used_at = datetime.now(timezone.utc)
             db.commit()
+            request.state.project_id = candidate.project_id
             user = db.get(User, candidate.created_by)
             if user is None:
                 raise HTTPException(status_code=401, detail="API key owner not found.")
@@ -157,7 +164,7 @@ async def verify_auth(
             _mark_auth_type(request, "admin_api_key")
             return None
         _mark_auth_type(request, "api_key")
-        return _resolve_user_from_api_key(x_api_key, db)
+        return _resolve_user_from_api_key(x_api_key, db, request)
 
     if AUTH_DISABLED:
         _mark_auth_type(request, "disabled")
@@ -213,3 +220,97 @@ async def require_admin(
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin role required.")
     return user
+
+
+# ---------------------------------------------------------------------------
+# Project-scoped auth
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ProjectContext:
+    user: User
+    project: Project
+    role: str  # "owner" or "reader"
+
+
+def _get_default_project(db: Session) -> Project | None:
+    """Return the first project (created by migration 007)."""
+    return db.scalar(select(Project).order_by(Project.created_at.asc()))
+
+
+async def require_project_auth(
+    request: Request,
+    user: User | None = Depends(verify_auth),
+    db: Session = Depends(get_db),
+) -> ProjectContext:
+    """Resolve user + project + role. Use for memory endpoints that require project context."""
+
+    # 1. Guarantee a user (same logic as require_auth)
+    if user is None:
+        auth_type = getattr(request.state, "auth_type", "none")
+        if auth_type in {"admin_api_key", "disabled"}:
+            default_user = _get_default_user(db)
+            if default_user is None:
+                raise HTTPException(status_code=401, detail="Authentication required.")
+            user = default_user
+        else:
+            raise HTTPException(status_code=401, detail="Authentication required.")
+
+    # 2. Resolve project
+    project: Project | None = None
+    auth_type = getattr(request.state, "auth_type", "none")
+
+    if auth_type == "api_key":
+        # project_id set by _resolve_user_from_api_key
+        project_id = getattr(request.state, "project_id", None)
+        if project_id is not None:
+            project = db.get(Project, project_id)
+        if project is None:
+            project = _get_default_project(db)
+
+    elif auth_type == "admin_api_key":
+        project = _get_default_project(db)
+
+    elif auth_type == "disabled":
+        project = _get_default_project(db)
+
+    elif auth_type == "bearer":
+        # JWT: read X-Project-Id header
+        project_id_header = request.headers.get("X-Project-Id")
+        if project_id_header:
+            try:
+                pid = uuid.UUID(project_id_header)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Invalid X-Project-Id header.")
+            project = db.get(Project, pid)
+        if project is None:
+            project = _get_default_project(db)
+
+    if project is None:
+        raise HTTPException(status_code=400, detail="Project context required.")
+
+    # 3. Verify membership (skip for admin_api_key and disabled modes)
+    if auth_type in {"admin_api_key", "disabled"}:
+        # Admin/disabled: assume owner role
+        return ProjectContext(user=user, project=project, role="owner")
+
+    member = db.scalar(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == user.id,
+        )
+    )
+    if member is None:
+        raise HTTPException(status_code=403, detail="You are not a member of this project.")
+
+    return ProjectContext(user=user, project=project, role=member.role)
+
+
+async def require_project_owner(
+    ctx: ProjectContext = Depends(require_project_auth),
+) -> ProjectContext:
+    """Like require_project_auth but additionally requires owner role."""
+    if ctx.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner access required.")
+    return ctx
