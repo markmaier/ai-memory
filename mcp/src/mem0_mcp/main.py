@@ -9,3 +9,7 @@ def main() -> None:
         host=settings.MCP_HOST,
         port=settings.MCP_PORT,
     )
+
+
+if __name__ == "__main__":
+    main()

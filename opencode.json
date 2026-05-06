@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "mem0-local": {
+      "type": "remote",
+      "url": "http://localhost:8080/mcp",
+      "enabled": true,
+      "timeout": 10000,
+      "headers": {
+        "X-API-Key": "Bearer m0sk_QAOqYD8wsy0zQ0PpTGmAzX2fiAiIioOuReq-bwr-cHM"
+      }
+    }
+  }
+}
