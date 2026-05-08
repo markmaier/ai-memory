@@ -1,8 +1,17 @@
-.PHONY: up down clean logs seed wait-api wait-dashboard bootstrap health build run_local reset-admin-password prune-logs
+.PHONY: up down clean logs seed wait-api wait-dashboard bootstrap health build run_local reset-admin-password prune-logs \
+        ecr-login build-api build-dashboard build-mcp build-all push-api push-dashboard push-mcp push-all deploy-api deploy-dashboard deploy-mcp deploy-all
 
 OUTPUT ?= text
 API_URL ?= http://localhost:8888
 DASHBOARD_URL ?= http://localhost:3000
+
+# --- ECR image build settings ---
+ECR_REGISTRY ?= 230970045646.dkr.ecr.eu-central-1.amazonaws.com
+ECR_REPO     ?= $(ECR_REGISTRY)/nca-497-5/ai-memory
+AWS_REGION   ?= eu-central-1
+TAG_API      ?= api
+TAG_DASHBOARD ?= dashboard
+TAG_MCP      ?= mcp
 
 up:
 	@for port in 3000 8888; do \
@@ -60,3 +69,39 @@ build:
 
 run_local:
 	docker run -p 8000:8000 -v $(shell pwd):/app mem0-api-server --env-file .env
+
+# --- ECR image build & push ---
+PLATFORM ?= linux/arm64
+
+ecr-login:
+	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+
+build-api:
+	docker build --platform $(PLATFORM) -f Dockerfile.eks -t $(ECR_REPO):$(TAG_API) .
+
+build-dashboard:
+	docker build --platform $(PLATFORM) -f dashboard/Dockerfile.eks -t $(ECR_REPO):$(TAG_DASHBOARD) dashboard/
+
+build-mcp:
+	docker build --platform $(PLATFORM) -f ../mcp/Dockerfile -t $(ECR_REPO):$(TAG_MCP) ../mcp/
+
+build-all: build-api build-dashboard build-mcp
+
+push-api:
+	docker push $(ECR_REPO):$(TAG_API)
+
+push-dashboard:
+	docker push $(ECR_REPO):$(TAG_DASHBOARD)
+
+push-mcp:
+	docker push $(ECR_REPO):$(TAG_MCP)
+
+push-all: push-api push-dashboard push-mcp
+
+deploy-api: ecr-login build-api push-api
+
+deploy-dashboard: ecr-login build-dashboard push-dashboard
+
+deploy-mcp: ecr-login build-mcp push-mcp
+
+deploy-all: ecr-login build-all push-all

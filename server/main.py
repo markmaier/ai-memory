@@ -114,10 +114,42 @@ POSTGRES_USER = os.environ.get("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "postgres")
 POSTGRES_COLLECTION_NAME = os.environ.get("POSTGRES_COLLECTION_NAME", "memories")
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
+DEFAULT_LLM_PROVIDER = os.environ.get("MEM0_DEFAULT_LLM_PROVIDER", "openai")
 DEFAULT_LLM_MODEL = os.environ.get("MEM0_DEFAULT_LLM_MODEL", "gpt-4.1-nano-2025-04-14")
+DEFAULT_EMBEDDER_PROVIDER = os.environ.get("MEM0_DEFAULT_EMBEDDER_PROVIDER", "openai")
 DEFAULT_EMBEDDER_MODEL = os.environ.get("MEM0_DEFAULT_EMBEDDER_MODEL", "text-embedding-3-small")
+AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
+
+_PROVIDER_API_KEYS = {
+    "openai": os.environ.get("OPENAI_API_KEY"),
+    "anthropic": os.environ.get("ANTHROPIC_API_KEY"),
+    "gemini": os.environ.get("GOOGLE_API_KEY"),
+}
+
+if DEFAULT_LLM_PROVIDER not in BUNDLED_LLM_PROVIDERS:
+    raise RuntimeError(
+        f"MEM0_DEFAULT_LLM_PROVIDER '{DEFAULT_LLM_PROVIDER}' is not bundled. "
+        f"Available: {', '.join(BUNDLED_LLM_PROVIDERS)}"
+    )
+if DEFAULT_EMBEDDER_PROVIDER not in BUNDLED_EMBEDDER_PROVIDERS:
+    raise RuntimeError(
+        f"MEM0_DEFAULT_EMBEDDER_PROVIDER '{DEFAULT_EMBEDDER_PROVIDER}' is not bundled. "
+        f"Available: {', '.join(BUNDLED_EMBEDDER_PROVIDERS)}"
+    )
+
+
+def _provider_config(provider: str, model: str, **extra) -> dict:
+    """Build a provider config dict with the right credentials."""
+    config: dict = {"model": model, **extra}
+    if provider == "aws_bedrock":
+        config["aws_region"] = AWS_REGION
+    elif provider in _PROVIDER_API_KEYS:
+        api_key = _PROVIDER_API_KEYS[provider]
+        if api_key:
+            config["api_key"] = api_key
+    return {"provider": provider, "config": config}
+
 
 DEFAULT_CONFIG = {
     "version": "v1.1",
@@ -132,11 +164,8 @@ DEFAULT_CONFIG = {
             "collection_name": POSTGRES_COLLECTION_NAME,
         },
     },
-    "llm": {
-        "provider": "openai",
-        "config": {"api_key": OPENAI_API_KEY, "temperature": 0.2, "model": DEFAULT_LLM_MODEL},
-    },
-    "embedder": {"provider": "openai", "config": {"api_key": OPENAI_API_KEY, "model": DEFAULT_EMBEDDER_MODEL}},
+    "llm": _provider_config(DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL, temperature=0.2),
+    "embedder": _provider_config(DEFAULT_EMBEDDER_PROVIDER, DEFAULT_EMBEDDER_MODEL),
     "history_db_path": HISTORY_DB_PATH,
 }
 
