@@ -3,65 +3,68 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { Check, Copy } from "lucide-react";
-import { CopyToClipboard } from "react-copy-to-clipboard";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { getErrorMessage } from "@/lib/error-message";
 import { isValidEmail } from "@/lib/validators";
 
-const RESET_COMMAND =
-  "make reset-admin-password EMAIL=<your-email> PASSWORD=<new-password>";
-
-export default function LoginForm() {
+export default function RegisterPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const { user, isLoading, login } = useAuth();
+  const { user, isLoading, register } = useAuth();
   const { resolvedTheme } = useTheme();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (!isLoading && user) {
-      router.push(searchParams.get("next") || "/dashboard/requests");
+    if (process.env.NEXT_PUBLIC_ALLOW_REGISTRATION === "false") {
+      router.replace("/login");
+      return;
     }
-  }, [user, isLoading, router, searchParams]);
-
-  const emailValid = isValidEmail(email);
+    if (!isLoading && user) {
+      router.replace("/dashboard/requests");
+    }
+  }, [isLoading, user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    if (!emailValid) {
+
+    if (!name.trim()) {
+      setError("Name is required.");
+      return;
+    }
+
+    if (!isValidEmail(email)) {
       setError("Enter a valid email address.");
       return;
     }
+
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords don't match.");
+      return;
+    }
+
     setSubmitting(true);
     try {
-      await login(email, password);
-      router.push(searchParams.get("next") || "/dashboard/requests");
+      await register(name.trim(), email, password);
+      router.push("/dashboard/requests");
     } catch (err) {
-      setError(getErrorMessage(err, "Login failed"));
+      setError(getErrorMessage(err, "Registration failed"));
     } finally {
       setSubmitting(false);
     }
@@ -74,11 +77,7 @@ export default function LoginForm() {
           <div className="flex justify-center mb-2">
             {mounted && (
               <Image
-                src={
-                  resolvedTheme === "dark"
-                    ? "/images/logos/logo-light.png"
-                    : "/images/logos/logo-dark.png"
-                }
+                src={resolvedTheme === "dark" ? "/images/logos/logo-light.png" : "/images/logos/logo-dark.png"}
                 alt="Mem0"
                 width={41}
                 height={41}
@@ -86,7 +85,7 @@ export default function LoginForm() {
             )}
           </div>
           <h1 className="text-2xl font-semibold text-onSurface-default-primary text-center mb-6 font-fustat">
-            Sign in to Mem0
+            Create your Mem0 account
           </h1>
           <div className="flex flex-col gap-4 border p-8 border-memBorder-primary rounded-xl">
             {error && (
@@ -96,92 +95,64 @@ export default function LoginForm() {
             )}
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <div className="space-y-1.5">
-                <Label htmlFor="login-email">Email</Label>
+                <Label htmlFor="register-name">Name</Label>
                 <Input
-                  id="login-email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@company.com"
+                  id="register-name"
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  maxLength={255}
                   required
                   autoFocus
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="login-password">Password</Label>
+                <Label htmlFor="register-email">Email</Label>
                 <Input
-                  id="login-password"
+                  id="register-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  maxLength={255}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="register-password">Password</Label>
+                <Input
+                  id="register-password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
                 />
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="register-confirm-password">Confirm Password</Label>
+                <Input
+                  id="register-confirm-password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                />
+              </div>
               <Button
                 type="submit"
-                disabled={submitting || !emailValid || !password}
+                disabled={submitting || !name.trim() || !isValidEmail(email) || !password || !confirmPassword}
                 variant="default"
                 size="lg"
                 className="w-full"
               >
-                {submitting ? "Signing in..." : "Sign in"}
+                {submitting ? "Creating account..." : "Create account"}
               </Button>
             </form>
-            <Dialog>
-              <DialogTrigger asChild>
-                <button
-                  type="button"
-                  className="text-xs text-onSurface-default-tertiary hover:text-onSurface-default-primary underline underline-offset-4 self-center"
-                >
-                  Forgot password?
-                </button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Reset your admin password</DialogTitle>
-                  <DialogDescription>
-                    Run this command on the server host. It overwrites the
-                    existing password; anyone already signed in stays signed in
-                    until their session expires.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="flex gap-2">
-                  <Input
-                    readOnly
-                    value={RESET_COMMAND}
-                    className="font-mono text-xs"
-                  />
-                  <CopyToClipboard
-                    text={RESET_COMMAND}
-                    onCopy={() => {
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    }}
-                  >
-                    <Button variant="outline" size="icon">
-                      {copied ? (
-                        <Check className="size-4" />
-                      ) : (
-                        <Copy className="size-4" />
-                      )}
-                    </Button>
-                  </CopyToClipboard>
-                </div>
-              </DialogContent>
-            </Dialog>
-            {process.env.NEXT_PUBLIC_ALLOW_REGISTRATION !== "false" && (
-              <div className="flex justify-center">
-                <Link
-                  href="/register"
-                  className="text-sm text-onSurface-default-tertiary hover:text-onSurface-default-primary text-center self-center"
-                >
-                  Don&apos;t have an account?{" "}
-                  <span className="underline underline-offset-4 font-medium">
-                    Register
-                  </span>
-                </Link>
-              </div>
-            )}
+            <Link
+              href="/login"
+              className="text-xs text-onSurface-default-tertiary hover:text-onSurface-default-primary underline underline-offset-4"
+            >
+              Already have an account? <span className="underline underline-offset-4 font-medium">Sign in</span>
+            </Link>
           </div>
         </div>
       </div>

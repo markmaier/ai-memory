@@ -19,7 +19,7 @@ export async function middleware(request: NextRequest) {
 
   const hasRefreshToken = request.cookies.has("mem0_refresh_token");
 
-  if (pathname === "/" || pathname === "/login" || pathname === "/setup") {
+  if (pathname === "/" || pathname === "/login" || pathname === "/setup" || pathname === "/register") {
     try {
       const res = await fetch(
         `${getServerApiUrl()}${AUTH_ENDPOINTS.SETUP_STATUS}`,
@@ -33,13 +33,20 @@ export async function middleware(request: NextRequest) {
         if (!needsSetup && pathname === "/setup") {
           return NextResponse.redirect(new URL("/login", request.url));
         }
+        if (needsSetup && pathname === "/register") {
+          return NextResponse.redirect(new URL("/setup", request.url));
+        }
       }
     } catch {
       // API unreachable — fall through to default behavior
     }
   }
 
-  if (pathname === "/login" || pathname === "/setup") {
+  if (pathname === "/register" && process.env.NEXT_PUBLIC_ALLOW_REGISTRATION === "false") {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  if (pathname === "/login" || pathname === "/setup" || pathname === "/register") {
     return NextResponse.next();
   }
 

@@ -101,6 +101,9 @@ def register(request: Request, body: RegisterRequest, db: Session = Depends(get_
 
     user_count = db.scalar(select(func.count(User.id))) or 0
 
+    if os.environ.get("ALLOW_REGISTRATION", "true").lower() == "false" and user_count > 0:
+        raise HTTPException(status_code=403, detail="Registration is currently disabled.")
+
     user = User(
         name=body.name,
         email=body.email,
