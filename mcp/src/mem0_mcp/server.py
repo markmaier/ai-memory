@@ -3,11 +3,19 @@ from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from mem0_mcp.client import Mem0Client
 from mem0_mcp.config import settings
 
 mcp = FastMCP("mem0-mcp-server")
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request) -> JSONResponse:
+    """Kubernetes readiness/liveness probe endpoint."""
+    return JSONResponse({"status": "ok"})
 
 
 def _get_request_api_key() -> str:
