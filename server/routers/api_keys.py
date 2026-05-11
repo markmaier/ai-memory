@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api-keys", tags=["api-keys"])
 
 class CreateKeyRequest(BaseModel):
     label: str
-    project_id: str
+    project_id: str | None = None
 
 
 class CreateKeyResponse(BaseModel):
@@ -76,7 +76,21 @@ def list_keys(
 
 @router.post("", response_model=CreateKeyResponse, status_code=201)
 def create_key(body: CreateKeyRequest, user: User = Depends(require_auth), db: Session = Depends(get_db)):
-    project_uuid = uuid_mod.UUID(body.project_id)
+    if body.project_id is not None:
+        project_uuid = uuid_mod.UUID(body.project_id)
+    else:
+        # Fall back to the user's first owned project (covers the setup wizard
+        # which doesn't know any project_id yet).
+        first_owned = db.execute(
+            select(ProjectMember.project_id)
+            .where(ProjectMember.user_id == user.id, ProjectMember.role == "owner")
+            .order_by(ProjectMember.created_at.asc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if first_owned is None:
+            raise HTTPException(status_code=400, detail="No project found. Create a project first.")
+        project_uuid = first_owned
+
     membership = db.execute(
         select(ProjectMember).where(
             ProjectMember.project_id == project_uuid,

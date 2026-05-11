@@ -445,7 +445,15 @@ def _serialize_memory(row: Any) -> Dict[str, Any]:
 
 def _list_all_memories(memory: Any, limit: int = ALL_MEMORIES_LIMIT) -> Dict[str, Any]:
     results = memory.vector_store.list(top_k=limit)
-    rows = results[0] if results and isinstance(results, list) and isinstance(results[0], list) else results or []
+    # vector_store.list() return type varies by provider:
+    #   - Qdrant scroll() returns a tuple (points, next_page_offset)
+    #   - Others may return a list of lists or a flat list
+    if isinstance(results, tuple):
+        rows = results[0] or []
+    elif results and isinstance(results, list) and results[0] and isinstance(results[0], list):
+        rows = results[0]
+    else:
+        rows = results or []
     return {"results": [_serialize_memory(row) for row in rows]}
 
 

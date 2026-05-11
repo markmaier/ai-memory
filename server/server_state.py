@@ -67,7 +67,11 @@ def _merge_config(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, An
 
     for key, value in updates.items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _merge_config(merged[key], value)
+            # Different providers have incompatible config schemas.
+            if "provider" in value and value.get("provider") != merged[key].get("provider"):
+                merged[key] = deepcopy(value)
+            else:
+                merged[key] = _merge_config(merged[key], value)
         else:
             merged[key] = value
 

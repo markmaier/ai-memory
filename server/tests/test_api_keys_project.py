@@ -82,13 +82,22 @@ class TestCreateKeyWithProject:
         )
         assert resp.status_code == 403
 
-    def test_create_key_missing_project_id_returns_422(self, client, owner_headers):
+    def test_create_key_without_project_id_falls_back_to_default(self, client, owner_headers, project):
         resp = client.post(
             "/api-keys",
             json={"label": "my-key"},
             headers=owner_headers,
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 201
+        assert resp.json()["label"] == "my-key"
+
+    def test_create_key_without_project_id_no_project_returns_400(self, client, owner_headers):
+        resp = client.post(
+            "/api-keys",
+            json={"label": "my-key"},
+            headers=owner_headers,
+        )
+        assert resp.status_code == 400
 
 
 class TestListKeysWithProject:
