@@ -1,5 +1,6 @@
 .PHONY: up down clean logs seed wait-api wait-dashboard bootstrap health build run_local reset-admin-password prune-logs \
-        ecr-login build-api build-dashboard build-mcp build-all push-api push-dashboard push-mcp push-all deploy-api deploy-dashboard deploy-mcp deploy-all
+        ecr-login build-api build-dashboard build-mcp build-all push-api push-dashboard push-mcp push-all deploy-api deploy-dashboard deploy-mcp deploy-all \
+        ecr-cleanup
 
 OUTPUT ?= text
 API_URL ?= http://localhost:8888
@@ -12,6 +13,11 @@ AWS_REGION   ?= eu-central-1
 TAG_API      ?= api
 TAG_DASHBOARD ?= dashboard
 TAG_MCP      ?= mcp
+
+# Temporary Docker config so ECR credentials never touch ~/.docker/config.json
+ECR_DOCKER_CONFIG := /tmp/mem0-ecr-docker-config
+DOCKER_CFG        = DOCKER_CONFIG=$(ECR_DOCKER_CONFIG)
+BUILDX_BUILDER   ?= mem0-builder
 
 up:
 	@for port in 3000 8888; do \
@@ -70,38 +76,62 @@ build:
 run_local:
 	docker run -p 8000:8000 -v $(shell pwd):/app mem0-api-server --env-file .env
 
-# --- ECR image build & push ---
+# --- ECR image build & push (buildx, cross-platform) ---
 PLATFORM ?= linux/arm64
 
 ecr-login:
-	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+	@mkdir -p $(ECR_DOCKER_CONFIG)
+	@ln -sfn $(HOME)/.docker/cli-plugins $(ECR_DOCKER_CONFIG)/cli-plugins
+	@ln -sfn $(HOME)/.docker/buildx $(ECR_DOCKER_CONFIG)/buildx
+	@TOKEN=$$(aws ecr get-login-password --region $(AWS_REGION)) && \
+		AUTH=$$(printf 'AWS:%s' "$$TOKEN" | base64 | tr -d '\n') && \
+		printf '{"credsStore":"","auths":{"%s":{"auth":"%s"}}}\n' "$(ECR_REGISTRY)" "$$AUTH" \
+			> $(ECR_DOCKER_CONFIG)/config.json && \
+		echo "Logged in to $(ECR_REGISTRY) (credentials in $(ECR_DOCKER_CONFIG))"
+
+ecr-cleanup:
+	@rm -rf $(ECR_DOCKER_CONFIG)
+	@echo "Cleaned up temporary Docker credentials."
 
 build-api:
-	docker build --platform $(PLATFORM) -f Dockerfile.eks -t $(ECR_REPO):$(TAG_API) .
+	$(DOCKER_CFG) docker buildx build --builder $(BUILDX_BUILDER) --platform $(PLATFORM) \
+		-f Dockerfile.eks -t $(ECR_REPO):$(TAG_API) .
 
 build-dashboard:
-	docker build --platform $(PLATFORM) -f dashboard/Dockerfile.eks -t $(ECR_REPO):$(TAG_DASHBOARD) dashboard/
+	$(DOCKER_CFG) docker buildx build --builder $(BUILDX_BUILDER) --platform $(PLATFORM) \
+		-f dashboard/Dockerfile.eks -t $(ECR_REPO):$(TAG_DASHBOARD) dashboard/
 
 build-mcp:
-	docker build --platform $(PLATFORM) -f ../mcp/Dockerfile -t $(ECR_REPO):$(TAG_MCP) ../mcp/
+	$(DOCKER_CFG) docker buildx build --builder $(BUILDX_BUILDER) --platform $(PLATFORM) \
+		-f ../mcp/Dockerfile -t $(ECR_REPO):$(TAG_MCP) ../mcp/
 
 build-all: build-api build-dashboard build-mcp
 
 push-api:
-	docker push $(ECR_REPO):$(TAG_API)
+	$(DOCKER_CFG) docker push $(ECR_REPO):$(TAG_API)
 
 push-dashboard:
-	docker push $(ECR_REPO):$(TAG_DASHBOARD)
+	$(DOCKER_CFG) docker push $(ECR_REPO):$(TAG_DASHBOARD)
 
 push-mcp:
-	docker push $(ECR_REPO):$(TAG_MCP)
+	$(DOCKER_CFG) docker push $(ECR_REPO):$(TAG_MCP)
 
 push-all: push-api push-dashboard push-mcp
 
-deploy-api: ecr-login build-api push-api
+deploy-api: ecr-login
+	$(DOCKER_CFG) docker buildx build --builder $(BUILDX_BUILDER) --platform $(PLATFORM) \
+		-f Dockerfile.eks -t $(ECR_REPO):$(TAG_API) --push .
 
-deploy-dashboard: ecr-login build-dashboard push-dashboard
+deploy-dashboard: ecr-login
+	$(DOCKER_CFG) docker buildx build --builder $(BUILDX_BUILDER) --platform $(PLATFORM) \
+		-f dashboard/Dockerfile.eks -t $(ECR_REPO):$(TAG_DASHBOARD) --push dashboard/
 
-deploy-mcp: ecr-login build-mcp push-mcp
+deploy-mcp: ecr-login
+	$(DOCKER_CFG) docker buildx build --builder $(BUILDX_BUILDER) --platform $(PLATFORM) \
+		-f ../mcp/Dockerfile -t $(ECR_REPO):$(TAG_MCP) --push ../mcp/
 
-deploy-all: ecr-login build-all push-all
+deploy-all: ecr-login
+	@$(MAKE) --no-print-directory deploy-api
+	@$(MAKE) --no-print-directory deploy-dashboard
+	@$(MAKE) --no-print-directory deploy-mcp
+	@$(MAKE) --no-print-directory ecr-cleanup
