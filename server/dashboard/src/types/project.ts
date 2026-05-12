@@ -10,6 +10,7 @@ export interface Project {
   name: string;
   description: string | null;
   collection_name: string;
+  is_personal: boolean;
   role: ProjectRole;
   created_at: string;
   updated_at: string;

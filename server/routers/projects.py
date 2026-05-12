@@ -11,6 +11,7 @@ from auth import require_auth
 from db import get_db
 from models import Organization, Project, ProjectMember, User
 from schemas import MessageResponse
+from server_state import drop_memory_collection, get_memory_for_project
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -33,6 +34,7 @@ class ProjectResponse(BaseModel):
     name: str
     description: str | None
     collection_name: str
+    is_personal: bool
     created_at: datetime
     updated_at: datetime
     role: str
@@ -97,6 +99,7 @@ def _to_project_response(project: Project, role: str) -> ProjectResponse:
         name=project.name,
         description=project.description,
         collection_name=project.collection_name,
+        is_personal=project.is_personal,
         created_at=project.created_at,
         updated_at=project.updated_at,
         role=role,
@@ -214,13 +217,25 @@ def delete_project(project_id: uuid.UUID, user: User = Depends(REQUIRE_AUTH_DEP)
     project, membership = _get_project_and_membership_or_403(db, project_id, user.id)
     _require_owner(membership)
 
+    if project.is_personal:
+        raise HTTPException(status_code=400, detail="Cannot delete a personal project.")
+
     project_count = db.scalar(select(func.count(Project.id))) or 0
     if project_count <= 1:
         raise HTTPException(status_code=400, detail="Cannot delete the last project")
 
+    collection_name = project.collection_name
     db.query(ProjectMember).filter(ProjectMember.project_id == project.id).delete(synchronize_session=False)
     db.delete(project)
     db.commit()
+
+    try:
+        memory = get_memory_for_project(collection_name)
+        memory.reset()
+        drop_memory_collection(collection_name)
+    except Exception:
+        pass  # DB rows already gone; best-effort vector cleanup
+
     return MessageResponse(message="Project deleted.")
 
 
@@ -239,6 +254,9 @@ def add_member(
 ):
     project, membership = _get_project_and_membership_or_403(db, project_id, user.id)
     _require_owner(membership)
+
+    if project.is_personal:
+        raise HTTPException(status_code=400, detail="Cannot add members to a personal project.")
 
     member_user = db.scalar(select(User).where(User.email == body.email))
     if member_user is None:

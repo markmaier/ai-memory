@@ -16,6 +16,7 @@ interface DeleteConfirmationModalProps {
   description: string;
   itemName: string;
   confirmButtonText?: string;
+  abortButtonText?: string;
 }
 
 const DeleteConfirmationModal = ({
@@ -26,6 +27,7 @@ const DeleteConfirmationModal = ({
   description,
   itemName,
   confirmButtonText = "Delete",
+  abortButtonText = "Cancel",
 }: DeleteConfirmationModalProps) => {
   const [confirmationText, setConfirmationText] = useState("");
 
@@ -63,7 +65,7 @@ const DeleteConfirmationModal = ({
 
         <div className="flex justify-end gap-2 mt-6">
           <Button onClick={handleClose} variant="outline">
-            Cancel
+            {abortButtonText}
           </Button>
           <Button
             onClick={handleConfirm}

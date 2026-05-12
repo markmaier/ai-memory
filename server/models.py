@@ -60,6 +60,7 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     collection_name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_personal: Mapped[bool] = mapped_column(default=False, server_default="false", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 

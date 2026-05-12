@@ -142,6 +142,30 @@ def register(request: Request, body: RegisterRequest, db: Session = Depends(get_
         db.commit()
 
         capture_admin_registered(email=body.email)
+    else:
+        # Non-admin: auto-create a personal project under the shared org
+        org = db.scalar(select(Organization).order_by(Organization.created_at.asc()))
+        if org is None:
+            org = Organization(name="My Organization")
+            db.add(org)
+            db.flush()
+
+        personal_project = Project(
+            org_id=org.id,
+            name="personal-memory",
+            collection_name=f"memories_{uuid.uuid4()}",
+            is_personal=True,
+        )
+        db.add(personal_project)
+        db.flush()
+
+        membership = ProjectMember(
+            project_id=personal_project.id,
+            user_id=user.id,
+            role="owner",
+        )
+        db.add(membership)
+        db.commit()
 
     return TokenResponse(
         access_token=create_access_token(str(user.id), user.role),
@@ -231,6 +255,22 @@ def change_password(
     user.password_hash = hash_password(body.new_password)
     db.commit()
     return MessageResponse(message="Password updated.")
+
+
+class UserSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: str
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/users", response_model=list[UserSummary])
+def list_users(user: User = Depends(require_auth), db: Session = Depends(get_db)):
+    """Return all registered users. Available to any authenticated user so project
+    owners can populate the Add Member combobox."""
+    users = db.scalars(select(User).order_by(User.name.asc())).all()
+    return users
 
 
 @router.post("/onboarding-complete", response_model=MessageResponse)

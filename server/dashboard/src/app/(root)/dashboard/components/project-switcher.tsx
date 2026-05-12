@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { ChevronDown, FolderKanban, Plus } from "lucide-react";
+import { ChevronDown, FolderKanban, Plus, User } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -90,7 +90,9 @@ export function ProjectSwitcher() {
             className="flex items-center gap-2 w-full text-left hover:bg-surface-default-secondary-hover rounded-md p-1.5 transition-colors"
           >
             <div className="flex items-center justify-center size-7 rounded-md bg-surface-default-tertiary shrink-0">
-              <FolderKanban className="size-4 text-onSurface-default-secondary" />
+              {activeProject?.is_personal
+                ? <User className="size-4 text-onSurface-default-secondary" />
+                : <FolderKanban className="size-4 text-onSurface-default-secondary" />}
             </div>
             <span className="typo-body-xs text-onSurface-default-primary truncate flex-1 min-w-0">
               {activeProject?.name ?? "Select Project"}
@@ -114,9 +116,23 @@ export function ProjectSwitcher() {
               <DropdownMenuItem
                 key={project.id}
                 onClick={() => handleSelect(project.id)}
-                className="typo-body-sm text-onSurface-default-primary hover:bg-surface-default-tertiary-hover focus:bg-surface-default-tertiary-hover cursor-pointer flex items-center justify-between"
+                className="typo-body-sm text-onSurface-default-primary hover:bg-surface-default-tertiary-hover focus:bg-surface-default-tertiary-hover cursor-pointer flex items-start justify-between"
               >
-                <span className="truncate">{project.name}</span>
+                <span className="flex items-start gap-1.5 min-w-0 flex-1">
+                  <span className="mt-0.5 shrink-0">
+                    {project.is_personal
+                      ? <User className="size-3.5 text-onSurface-default-secondary" />
+                      : <FolderKanban className="size-3.5 text-onSurface-default-secondary" />}
+                  </span>
+                  <span className="flex flex-col min-w-0">
+                    <span className="truncate">{project.name}</span>
+                    {project.description && (
+                      <span className="truncate typo-caption-sm text-onSurface-default-tertiary">
+                        {project.description}
+                      </span>
+                    )}
+                  </span>
+                </span>
                 <div className="flex items-center gap-1 shrink-0 ml-2">
                   <Badge
                     variant="outline"
