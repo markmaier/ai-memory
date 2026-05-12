@@ -41,3 +41,8 @@ export const PROJECT_ENDPOINTS = {
   MEMBER_BY_ID: (projectId: string, memberId: string) =>
     `/projects/${projectId}/members/${memberId}`,
 } as const;
+
+export const USER_ENDPOINTS = {
+  BASE: "/users",
+  BY_ID: (id: string) => `/users/${id}`,
+} as const;

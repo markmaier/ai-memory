@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
+import { useAuth } from "@/hooks/use-auth";
 import {
   Sidebar,
   SidebarContent,
@@ -31,6 +32,7 @@ export function MainNav({
   ...props
 }: React.HTMLAttributes<HTMLElement>) {
   const pathname = usePathname();
+  const { isAdmin } = useAuth();
   const isSidebarCollapsed = useSelector(
     (state: RootState) => state.layout.isSidebarCollapsed,
   );
@@ -153,6 +155,50 @@ export function MainNav({
             </div>
           </SidebarMenu>
         </SidebarGroup>
+
+        {isAdmin && (
+          <SidebarGroup>
+            <SidebarMenu className="gap-0">
+              <div className="flex flex-col gap-0">
+                {!isSidebarCollapsed && (
+                  <SidebarGroupLabel className="mb-0">
+                    ADMIN
+                  </SidebarGroupLabel>
+                )}
+                {[
+                  {
+                    title: "Users",
+                    url: "/dashboard/users",
+                    icon: Users,
+                    active: pathname === "/dashboard/users",
+                  },
+                ].map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      collapsed={isSidebarCollapsed}
+                      active={item.active}
+                      tooltip={isSidebarCollapsed ? item.title : undefined}
+                    >
+                      <Link
+                        href={item.url}
+                        className={cn(
+                          "flex items-center w-full",
+                          isSidebarCollapsed
+                            ? "justify-center mx-auto"
+                            : "gap-1.5",
+                        )}
+                      >
+                        <item.icon className="size-4 shrink-0" />
+                        {!isSidebarCollapsed && <span>{item.title}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </div>
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarRail />
     </Sidebar>

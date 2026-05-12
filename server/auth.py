@@ -227,6 +227,15 @@ async def require_admin(
 # ---------------------------------------------------------------------------
 
 
+async def require_admin(
+    user: User = Depends(require_auth),
+) -> User:
+    """Like require_auth but additionally requires the user to have the admin role."""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return user
+
+
 @dataclass
 class ProjectContext:
     user: User
