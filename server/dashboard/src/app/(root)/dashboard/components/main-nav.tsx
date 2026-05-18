@@ -117,12 +117,6 @@ export function MainNav({
                     active: pathname === "/dashboard/projects",
                   },
                   {
-                    title: "Configuration",
-                    url: "/dashboard/configuration",
-                    icon: Wrench,
-                    active: pathname === "/dashboard/configuration",
-                  },
-                  {
                     title: "Settings",
                     url: "/dashboard/settings",
                     icon: Settings,
@@ -166,6 +160,12 @@ export function MainNav({
                   </SidebarGroupLabel>
                 )}
                 {[
+                  {
+                    title: "Configuration",
+                    url: "/dashboard/configuration",
+                    icon: Wrench,
+                    active: pathname === "/dashboard/configuration",
+                  },
                   {
                     title: "Users",
                     url: "/dashboard/users",

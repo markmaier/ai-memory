@@ -45,7 +45,8 @@ export function ProjectSwitcher() {
   // Auto-select first project if none is active
   useEffect(() => {
     if (!activeProjectId && projects.length > 0) {
-      dispatch(setActiveProject(projects[0].id));
+      const personal = projects.find((p: Project) => p.is_personal);
+      dispatch(setActiveProject((personal ?? projects[0]).id));
     }
   }, [activeProjectId, projects, dispatch]);
 
