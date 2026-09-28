@@ -58,6 +58,9 @@ def override_database(test_engine, monkeypatch):
     session_factory = sessionmaker(bind=test_engine, autoflush=False, expire_on_commit=False)
     monkeypatch.setattr(db_module, "SessionLocal", session_factory)
     monkeypatch.setattr(main_module, "SessionLocal", session_factory)
+    # auth.py imported SessionLocal by value and opens its own request-scoped
+    # sessions, so it needs the same redirect or it dials the real Postgres.
+    monkeypatch.setattr(auth_module, "SessionLocal", session_factory)
 
     def override_get_db():
         db = session_factory()

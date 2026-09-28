@@ -256,69 +256,72 @@ def _get_default_project(db: Session) -> Project | None:
 async def require_project_auth(
     request: Request,
     user: User | None = Depends(verify_auth),
-    db: Session = Depends(get_db),
 ) -> ProjectContext:
-    """Resolve user + project + role. Use for memory endpoints that require project context."""
+    """Resolve user + project + role. Use for memory endpoints that require project context.
 
-    # 1. Guarantee a user (same logic as require_auth)
-    if user is None:
-        auth_type = getattr(request.state, "auth_type", "none")
-        if auth_type in {"admin_api_key", "disabled"}:
-            default_user = _get_default_user(db)
-            if default_user is None:
+    The session is scoped to this resolver rather than the request, so no pooled
+    connection is held while the (possibly long-running) endpoint does its work.
+    """
+    with SessionLocal() as db:
+        # 1. Guarantee a user (same logic as require_auth)
+        if user is None:
+            auth_type = getattr(request.state, "auth_type", "none")
+            if auth_type in {"admin_api_key", "disabled"}:
+                default_user = _get_default_user(db)
+                if default_user is None:
+                    raise HTTPException(status_code=401, detail="Authentication required.")
+                user = default_user
+            else:
                 raise HTTPException(status_code=401, detail="Authentication required.")
-            user = default_user
-        else:
-            raise HTTPException(status_code=401, detail="Authentication required.")
 
-    # 2. Resolve project
-    project: Project | None = None
-    auth_type = getattr(request.state, "auth_type", "none")
+        # 2. Resolve project
+        project: Project | None = None
+        auth_type = getattr(request.state, "auth_type", "none")
 
-    if auth_type == "api_key":
-        # project_id set by _resolve_user_from_api_key
-        project_id = getattr(request.state, "project_id", None)
-        if project_id is not None:
-            project = db.get(Project, project_id)
-        if project is None:
+        if auth_type == "api_key":
+            # project_id set by _resolve_user_from_api_key
+            project_id = getattr(request.state, "project_id", None)
+            if project_id is not None:
+                project = db.get(Project, project_id)
+            if project is None:
+                project = _get_default_project(db)
+
+        elif auth_type == "admin_api_key":
             project = _get_default_project(db)
 
-    elif auth_type == "admin_api_key":
-        project = _get_default_project(db)
-
-    elif auth_type == "disabled":
-        project = _get_default_project(db)
-
-    elif auth_type == "bearer":
-        # JWT: read X-Project-Id header
-        project_id_header = request.headers.get("X-Project-Id")
-        if project_id_header:
-            try:
-                pid = uuid.UUID(project_id_header)
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=400, detail="Invalid X-Project-Id header.")
-            project = db.get(Project, pid)
-        if project is None:
+        elif auth_type == "disabled":
             project = _get_default_project(db)
 
-    if project is None:
-        raise HTTPException(status_code=400, detail="Project context required.")
+        elif auth_type == "bearer":
+            # JWT: read X-Project-Id header
+            project_id_header = request.headers.get("X-Project-Id")
+            if project_id_header:
+                try:
+                    pid = uuid.UUID(project_id_header)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail="Invalid X-Project-Id header.")
+                project = db.get(Project, pid)
+            if project is None:
+                project = _get_default_project(db)
 
-    # 3. Verify membership (skip for admin_api_key and disabled modes)
-    if auth_type in {"admin_api_key", "disabled"}:
-        # Admin/disabled: assume owner role
-        return ProjectContext(user=user, project=project, role="owner")
+        if project is None:
+            raise HTTPException(status_code=400, detail="Project context required.")
 
-    member = db.scalar(
-        select(ProjectMember).where(
-            ProjectMember.project_id == project.id,
-            ProjectMember.user_id == user.id,
+        # 3. Verify membership (skip for admin_api_key and disabled modes)
+        if auth_type in {"admin_api_key", "disabled"}:
+            # Admin/disabled: assume owner role
+            return ProjectContext(user=user, project=project, role="owner")
+
+        member = db.scalar(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project.id,
+                ProjectMember.user_id == user.id,
+            )
         )
-    )
-    if member is None:
-        raise HTTPException(status_code=403, detail="You are not a member of this project.")
+        if member is None:
+            raise HTTPException(status_code=403, detail="You are not a member of this project.")
 
-    return ProjectContext(user=user, project=project, role=member.role)
+        return ProjectContext(user=user, project=project, role=member.role)
 
 
 async def require_project_owner(
