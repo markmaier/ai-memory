@@ -1,8 +1,0 @@
-=== healthz endpoint ===
-6:@router.get("/healthz")
-7:def healthz():
-
-=== health_router in main.py ===
-9:from app.routers import apps_router, backup_router, config_router, health_router, memories_router, stats_router
-109:app.include_router(health_router)
-RESULT: PASS - /healthz endpoint defined and included in main app

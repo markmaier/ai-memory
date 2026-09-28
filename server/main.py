@@ -19,7 +19,6 @@ from errors import (
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
-from mem0.exceptions import ValidationError as Mem0ValidationError
 from models import RequestLog, User
 from pydantic import BaseModel, Field
 from rate_limit import limiter
@@ -42,6 +41,8 @@ from server_state import (
 from slowapi import _rate_limit_exceeded_handler  # pyright: ignore[reportMissingImports]
 from slowapi.errors import RateLimitExceeded  # pyright: ignore[reportMissingImports]
 from sqlalchemy import func, select
+
+from mem0.exceptions import ValidationError as Mem0ValidationError
 
 load_dotenv()
 
@@ -117,7 +118,7 @@ POSTGRES_COLLECTION_NAME = os.environ.get("POSTGRES_COLLECTION_NAME", "memories"
 
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
 DEFAULT_LLM_PROVIDER = os.environ.get("MEM0_DEFAULT_LLM_PROVIDER", "openai")
-DEFAULT_LLM_MODEL = os.environ.get("MEM0_DEFAULT_LLM_MODEL", "gpt-4.1-nano-2025-04-14")
+DEFAULT_LLM_MODEL = os.environ.get("MEM0_DEFAULT_LLM_MODEL", "gpt-5-mini")
 DEFAULT_EMBEDDER_PROVIDER = os.environ.get("MEM0_DEFAULT_EMBEDDER_PROVIDER", "openai")
 DEFAULT_EMBEDDER_MODEL = os.environ.get("MEM0_DEFAULT_EMBEDDER_MODEL", "text-embedding-3-small")
 AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")

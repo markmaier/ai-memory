@@ -1,2 +1,0 @@
-17:_cors_origins_raw = os.getenv("CORS_ALLOWED_ORIGINS", "*")
-RESULT: PASS - CORS origins read from CORS_ALLOWED_ORIGINS env var with '*' default
