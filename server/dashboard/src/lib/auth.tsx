@@ -61,6 +61,19 @@ async function refreshSession(): Promise<boolean> {
   return true;
 }
 
+async function ssoLogin(): Promise<boolean> {
+  // Only succeeds when this route is gated by the Netcetera SSO (Keycloak)
+  // SecurityPolicy, which forwards an access token for this call to trade in.
+  const res = await fetch("/api/auth/sso", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) return false;
+  const data = await res.json();
+  setAccessToken(data.access_token);
+  return true;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -74,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let active = true;
     (async () => {
       try {
-        const ok = await refreshSession();
+        const ok = (await refreshSession()) || (await ssoLogin());
         if (ok && active) await loadUser();
       } catch {
         if (active) setUser(null);

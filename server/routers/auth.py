@@ -1,8 +1,10 @@
 import os
+import secrets
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +18,7 @@ from auth import (
     dummy_verify_password,
     hash_password,
     require_auth,
+    verify_oidc_access_token,
     verify_password,
 )
 from db import get_db
@@ -182,6 +185,85 @@ def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
     if not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    user.last_login_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return TokenResponse(
+        access_token=create_access_token(str(user.id), user.role),
+        refresh_token=create_refresh_token(str(user.id), db),
+    )
+
+
+sso_bearer_scheme = HTTPBearer(auto_error=True)
+
+
+def _provision_sso_member(email: str, name: str, db: Session) -> User:
+    """Create a member account + personal project for a first-time SSO login.
+
+    Mirrors the non-admin branch of /auth/register. The password hash is an
+    unusable random secret — this account can only ever authenticate via SSO.
+    """
+    user = User(
+        name=name,
+        email=email,
+        password_hash=hash_password(secrets.token_urlsafe(32)),
+        role="member",
+    )
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost a race with a concurrent first login for the same email.
+        db.rollback()
+        existing = db.scalar(select(User).where(User.email == email))
+        if existing is None:
+            raise HTTPException(status_code=500, detail="Failed to provision SSO user.")
+        return existing
+    db.refresh(user)
+
+    org = db.scalar(select(Organization).order_by(Organization.created_at.asc()))
+    if org is None:
+        org = Organization(name="My Organization")
+        db.add(org)
+        db.flush()
+
+    personal_project = Project(
+        org_id=org.id,
+        name="personal-memory",
+        collection_name=f"memories_{uuid.uuid4()}",
+        is_personal=True,
+    )
+    db.add(personal_project)
+    db.flush()
+
+    db.add(ProjectMember(project_id=personal_project.id, user_id=user.id, role="owner"))
+    db.commit()
+    return user
+
+
+@router.post("/sso-login", response_model=TokenResponse)
+@limiter.limit("20/minute")
+def sso_login(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(sso_bearer_scheme),
+    db: Session = Depends(get_db),
+):
+    """Exchange a Netcetera SSO (Keycloak) access token for a mem0 session.
+
+    The Envoy Gateway SecurityPolicy in front of the dashboard forwards this token
+    after a successful OIDC login. A first-time email auto-provisions a member
+    account, so completing SSO is sufficient on its own — no separate registration.
+    """
+    claims = verify_oidc_access_token(credentials.credentials)
+    email = claims.get("email")
+    if not email:
+        raise HTTPException(status_code=401, detail="SSO token has no email claim.")
+
+    user = db.scalar(select(User).where(User.email == email))
+    if user is None:
+        name = claims.get("name") or claims.get("preferred_username") or email.split("@")[0]
+        user = _provision_sso_member(email, name, db)
 
     user.last_login_at = datetime.now(timezone.utc)
     db.commit()

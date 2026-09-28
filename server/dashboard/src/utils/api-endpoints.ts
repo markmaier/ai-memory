@@ -2,6 +2,7 @@ export const AUTH_ENDPOINTS = {
   SETUP_STATUS: "/auth/setup-status",
   REGISTER: "/auth/register",
   LOGIN: "/auth/login",
+  SSO_LOGIN: "/auth/sso-login",
   REFRESH: "/auth/refresh",
   ME: "/auth/me",
   CHANGE_PASSWORD: "/auth/change-password",

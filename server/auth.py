@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from db import SessionLocal
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
@@ -18,6 +19,13 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
+
+# Netcetera SSO (Keycloak OIDC), forwarded by the Envoy Gateway SecurityPolicy in
+# front of the dashboard. Separate from the app's own JWT_SECRET-signed tokens.
+OIDC_ISSUER_URL = os.environ.get("OIDC_ISSUER_URL", "").rstrip("/")
+OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID", "")
+_OIDC_JWKS_TTL_SECONDS = 3600
+_oidc_jwks_cache: dict = {"keys": [], "fetched_at": 0.0}
 AUTH_DISABLED = os.environ.get("AUTH_DISABLED", "").lower() in {"1", "true", "yes", "on"}
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -100,6 +108,66 @@ def decode_token(token: str) -> dict:
         return jwt.decode(token, _get_secret(), algorithms=[JWT_ALGORITHM])
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token.")
+
+
+def _fetch_oidc_jwks(force: bool = False) -> list[dict]:
+    now = datetime.now(timezone.utc).timestamp()
+    if not force and _oidc_jwks_cache["keys"] and now - _oidc_jwks_cache["fetched_at"] < _OIDC_JWKS_TTL_SECONDS:
+        return _oidc_jwks_cache["keys"]
+    if not OIDC_ISSUER_URL:
+        raise HTTPException(status_code=503, detail="SSO is not configured on this server.")
+    try:
+        resp = httpx.get(f"{OIDC_ISSUER_URL}/protocol/openid-connect/certs", timeout=5.0)
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        raise HTTPException(status_code=503, detail="Could not reach the SSO provider.")
+    keys = resp.json().get("keys", [])
+    _oidc_jwks_cache["keys"] = keys
+    _oidc_jwks_cache["fetched_at"] = now
+    return keys
+
+
+def verify_oidc_access_token(token: str) -> dict:
+    """Verify a Netcetera SSO (Keycloak) access token and return its claims.
+
+    The Envoy Gateway SecurityPolicy in front of the dashboard forwards this token
+    after a successful OIDC login; it is signed by Keycloak, not JWT_SECRET, so it
+    needs its own verification path against the realm's JWKS rather than decode_token.
+    """
+    if not OIDC_ISSUER_URL or not OIDC_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="SSO is not configured on this server.")
+    try:
+        header = jwt.get_unverified_header(token)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid SSO token.")
+
+    keys = _fetch_oidc_jwks()
+    key = next((k for k in keys if k.get("kid") == header.get("kid")), None)
+    if key is None:
+        # Keycloak may have rotated its signing key; refetch once before giving up.
+        keys = _fetch_oidc_jwks(force=True)
+        key = next((k for k in keys if k.get("kid") == header.get("kid")), None)
+    if key is None:
+        raise HTTPException(status_code=401, detail="Invalid SSO token.")
+
+    try:
+        claims = jwt.decode(
+            token,
+            key,
+            algorithms=[key.get("alg", "RS256")],
+            issuer=OIDC_ISSUER_URL,
+            options={"verify_aud": False},  # Keycloak identifies the client via azp, not aud
+        )
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired SSO token.")
+
+    aud = claims.get("aud") or []
+    if isinstance(aud, str):
+        aud = [aud]
+    if claims.get("azp") != OIDC_CLIENT_ID and OIDC_CLIENT_ID not in aud:
+        raise HTTPException(status_code=401, detail="SSO token was not issued for this client.")
+
+    return claims
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
