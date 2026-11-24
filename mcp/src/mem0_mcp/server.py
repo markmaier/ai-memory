@@ -57,7 +57,7 @@ async def _resolve_user_id_from_api_key(api_key: str) -> str:
             user_id = str(response.json()["id"])
             _user_id_cache[api_key] = (user_id, time.time())
             return user_id
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort lookup; any failure falls back to no user id
         return ""
 
 
@@ -76,7 +76,7 @@ def _build_client(api_key: str = "", api_url: str | None = None, agent_id: str |
 
 
 async def _close_client(client: Mem0Client) -> None:
-    await client._client.aclose()  # noqa: SLF001
+    await client._client.aclose()
 
 
 @mcp.tool(description="Add new memories for a user.")

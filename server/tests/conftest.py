@@ -20,7 +20,7 @@ from models import APIKey, Base, User
 
 Memory.from_config = classmethod(lambda cls, config: SimpleNamespace(llm=SimpleNamespace(), vector_store=SimpleNamespace()))
 
-import main as main_module
+import main as main_module  # noqa: E402 - must import after Memory.from_config is stubbed
 
 
 TEST_PASSWORD = "password123"
